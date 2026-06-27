@@ -1,5 +1,9 @@
 # sas-map-editor
 
+<p align="center">
+  <img src="assets/sas-logo.png" alt="SAS" width="120">
+</p>
+
 A lightweight, dependency-free editor for ROS occupancy grid maps. Built for Nav2 navigation pipelines that occasionally need a clean way to fix noisy SLAM output, add a missing wall, mark a keep-out zone, or set a meaningful world origin, without leaving the browser and without committing irreversible changes to a raster file.
 
 Every drawing operation is a non-destructive vector object. Walls, erasures, un-scanned regions and keep-out zones are all editable shapes that stay editable until you explicitly flatten them or export. The original PGM is touched only on export.

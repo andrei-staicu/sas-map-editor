@@ -1,0 +1,3763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Map editor · SAS · Edit ROS/Nav2 occupancy grid maps</title>
+<meta name="description" content="A web-based editor for ROS/Nav2 occupancy grid maps with non-destructive vector overlays. Built for the Semantic Autonomy Stack.">
+<meta name="author" content="STAICU Andrei-Alexandru">
+<meta name="keywords" content="ROS, Nav2, SLAM, map editor, occupancy grid, PGM, robotics, autonomous navigation, SAS, semantic autonomy stack">
+<link rel="icon" type="image/png" href="assets/sas-logo.png">
+<link rel="apple-touch-icon" href="assets/sas-logo.png">
+<style>
+  :root, [data-theme="dark"] {
+    --bg: #1E1E1C;
+    --surface: #262624;
+    --surface-elevated: #2F2F2C;
+    --surface-muted: #3A3A36;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --text: #EAE9E1;
+    --text-muted: #9A988F;
+    --text-subtle: #6E6B62;
+    --accent: #D4775A;
+    --accent-hover: #E08A6E;
+    --accent-bg: rgba(212, 119, 90, 0.18);
+    --danger: #D4775A;
+    --serif: ui-serif, "Charter", "Iowan Old Style", Georgia, "Times New Roman", serif;
+    /* canvas always light, even in dark mode, to avoid wall/empty confusion */
+    --canvas-bg: #F0EEE6;
+    --canvas-dot: rgba(20,20,19,0.04);
+    --measure: #4A6D8C;
+    --origin-x: #B85436;
+    --origin-y: #5A7D3A;
+    --vector-selected: #C96442;
+    --vector-handle: #FFFFFF;
+  }
+  [data-theme="light"] {
+    --bg: #F0EEE6;
+    --surface: #FAF9F5;
+    --surface-elevated: #FFFFFF;
+    --surface-muted: #E8E6DC;
+    --border: rgba(20, 20, 19, 0.08);
+    --border-strong: rgba(20, 20, 19, 0.16);
+    --text: #141413;
+    --text-muted: #6B6B6B;
+    --text-subtle: #93918A;
+    --accent: #C96442;
+    --accent-hover: #B85636;
+    --accent-bg: #F5E9E3;
+    --danger: #B85436;
+    --canvas-bg: #F0EEE6;
+    --canvas-dot: rgba(20,20,19,0.04);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body { overflow-x: hidden; }
+  button, input[type="text"], input[type="number"], select {
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 6px 10px;
+    transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+  }
+  button { cursor: pointer; user-select: none; }
+  button:hover:not(:disabled) { background: var(--surface-muted); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.active { background: var(--accent); color: white; border-color: var(--accent); }
+  button.active:hover { background: var(--accent-hover); }
+  button.icon-btn {
+    padding: 6px 8px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 32px;
+  }
+  button.icon-btn svg { display: block; flex-shrink: 0; }
+  button.subtle {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-muted);
+  }
+  button.subtle:hover { background: var(--surface-muted); color: var(--text); }
+  button.full-btn { width: 100%; margin-top: 8px; }
+  button.danger { color: var(--danger); border-color: var(--danger); }
+  button.danger:hover { background: var(--danger); color: white; }
+  input[type="text"]:focus, input[type="number"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-bg);
+  }
+  input.input-error {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 3px rgba(184, 84, 54, 0.15);
+  }
+  input[type="text"], input[type="number"] {
+    width: 100%;
+  }
+  input[type="range"] {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; background: var(--surface-muted); border-radius: 2px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border-radius: 50%; margin-top: -5px;
+    cursor: pointer;
+    transition: transform 0.12s ease;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  label.checkbox {
+    display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; font-size: 12px; color: var(--text-muted);
+  }
+  label.checkbox input { margin: 0; }
+
+  /* Layout */
+  .app {
+    display: grid;
+    grid-template-columns: 280px 1fr 320px;
+    grid-template-rows: 56px 1fr 32px;
+    grid-template-areas:
+      "topbar  topbar  topbar"
+      "left    canvas  right"
+      "status  status  status";
+    width: 100vw; height: 100vh;
+  }
+
+  .topbar {
+    grid-area: topbar;
+    display: flex; align-items: center;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    overflow-x: auto;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding-right: 16px; margin-right: 8px;
+    border-right: 1px solid var(--border);
+    height: 36px;
+    flex-shrink: 0;
+  }
+  .brand-logo {
+    width: 28px; height: 28px;
+    object-fit: contain;
+    border-radius: 4px;
+  }
+  .brand-title {
+    font-family: var(--serif);
+    font-size: 17px; font-style: italic; color: var(--text);
+  }
+  .brand-sub {
+    font-size: 11px; color: var(--text-subtle);
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .toolbar { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+  .toolbar-divider { width: 1px; height: 24px; background: var(--border); margin: 0 6px; }
+  .topbar-right { margin-left: auto; display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+
+  /* Side panels */
+  .panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto; overflow-x: hidden;
+  }
+  .panel-left { grid-area: left; }
+  .panel-right { grid-area: right; border-right: none; border-left: 1px solid var(--border); }
+  .panel-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel-section:last-child { border-bottom: none; }
+  .panel-section h3 {
+    margin: 0 0 10px 0;
+    font-family: var(--serif);
+    font-size: 13px; font-weight: 600; font-style: italic;
+    color: var(--text);
+    text-transform: lowercase; letter-spacing: 0.3px;
+  }
+  .panel-section h4 {
+    margin: 12px 0 8px 0;
+    font-size: 11px; font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .panel-empty {
+    padding: 24px 16px; text-align: center;
+    color: var(--text-subtle); font-size: 12px;
+  }
+  .panel-empty-icon {
+    width: 32px; height: 32px;
+    margin: 0 auto 10px;
+    color: var(--text-subtle); opacity: 0.5;
+  }
+  .file-drop {
+    border: 2px dashed var(--border-strong);
+    border-radius: 8px; padding: 16px; text-align: center;
+    font-size: 12px; color: var(--text-muted);
+    transition: border-color 0.12s ease, background 0.12s ease;
+    cursor: pointer; display: block;
+  }
+  .file-drop:hover { border-color: var(--accent); background: var(--accent-bg); }
+  .file-drop.dragover {
+    border-color: var(--accent); background: var(--accent-bg); color: var(--accent);
+  }
+  .file-drop strong { color: var(--text); }
+  .file-drop input[type="file"] { display: none; }
+  .meta-list {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: var(--text-muted); line-height: 1.8;
+  }
+  .meta-list .key { color: var(--text-subtle); }
+  .meta-list .val { color: var(--text); }
+  .prop-row {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 8px; align-items: center;
+    margin-bottom: 8px;
+  }
+  .prop-row label { font-size: 12px; color: var(--text-muted); }
+  .row-flex { display: flex; gap: 8px; align-items: center; }
+  .row-flex.spaced { justify-content: space-between; }
+
+  /* Layer list */
+  .layer-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    transition: background 0.12s ease;
+  }
+  .layer-item:hover { background: var(--surface-muted); }
+  .layer-item.active { background: var(--accent-bg); }
+  .layer-item .layer-name {
+    flex: 1; font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .layer-item button.icon-btn {
+    padding: 2px 4px; min-height: 0;
+    background: transparent; border: none;
+    color: var(--text-muted);
+  }
+  .layer-item button.icon-btn:hover { color: var(--text); }
+  .layer-item input[type="range"] { width: 60px; margin: 0; }
+
+  /* Shape list */
+  .shape-list { max-height: 220px; overflow-y: auto; }
+  .shape-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.12s ease;
+  }
+  .shape-item:hover { background: var(--surface-muted); }
+  .shape-item.selected { background: var(--accent-bg); color: var(--accent); }
+  .shape-item .shape-kind {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px; color: var(--text-subtle);
+  }
+  .shape-item.selected .shape-kind { color: var(--accent); }
+
+  /* Canvas */
+  .canvas-area {
+    grid-area: canvas;
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 0) 0 0 / 24px 24px,
+      var(--canvas-bg);
+  }
+  .canvas-area canvas {
+    position: absolute;
+    top: 0; left: 0;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  .canvas-area canvas.overlay { image-rendering: auto; }
+  .canvas-empty {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+    color: #93918A;
+    text-align: center; padding: 40px;
+  }
+  .canvas-empty.dragover { background: rgba(201, 100, 66, 0.15); color: #C96442; }
+  .canvas-empty svg { width: 56px; height: 56px; opacity: 0.4; }
+  .canvas-empty h2 {
+    margin: 0;
+    font-family: var(--serif); font-style: italic; font-weight: 400;
+    font-size: 22px; color: #141413;
+  }
+  .canvas-empty p { margin: 0; font-size: 13px; max-width: 360px; line-height: 1.5; }
+  .canvas-empty code {
+    font-family: ui-monospace, Menlo, monospace;
+    background: #E8E6DC;
+    padding: 2px 6px; border-radius: 4px;
+    color: #141413; font-size: 12px;
+  }
+  .canvas-controls {
+    position: absolute;
+    bottom: 16px; right: 16px;
+    display: flex; flex-direction: column; gap: 4px;
+    background: #FFFFFF;
+    border: 1px solid rgba(20,20,19,0.08);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 2px 8px rgba(20, 20, 19, 0.12);
+    z-index: 5;
+  }
+  .canvas-controls button {
+    width: 32px; height: 32px;
+    padding: 0; border: none; background: transparent;
+    color: #6B6B6B; border-radius: 4px;
+  }
+  .canvas-controls button:hover { background: #E8E6DC; color: #141413; }
+  .measure-hud {
+    position: absolute;
+    pointer-events: none;
+    background: #FFFFFF;
+    border: 1px solid rgba(20,20,19,0.16);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: #141413;
+    box-shadow: 0 2px 8px rgba(20,20,19,0.12);
+    z-index: 10;
+    white-space: nowrap;
+  }
+
+  /* Status bar */
+  .statusbar {
+    grid-area: status;
+    display: flex; align-items: center;
+    padding: 0 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px; color: var(--text-muted);
+    gap: 16px;
+  }
+  .status-item .label { color: var(--text-subtle); margin-right: 4px; }
+  .status-item .val { color: var(--text); }
+  .status-spacer { flex: 1; }
+
+  .kbd {
+    display: inline-block;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--text-muted); line-height: 1.4;
+  }
+
+  .shape-toolbar {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 8px 0;
+  }
+  .shape-toolbar button {
+    padding: 5px 8px;
+    font-size: 11px;
+    min-height: 28px;
+  }
+  .target-swatch {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .target-btn { gap: 6px; }
+  .target-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .target-btn.active:hover { background: var(--accent-hover); }
+
+  /* About section */
+  .about {
+    width: 100vw;
+    padding: 96px 24px 80px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    color: var(--text);
+  }
+  .about-inner {
+    max-width: 920px;
+    margin: 0 auto;
+  }
+  .about h2 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 32px;
+    margin: 0 0 24px;
+    color: var(--text);
+  }
+  .about h3 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 22px;
+    margin: 56px 0 16px;
+    color: var(--text);
+  }
+  .about p {
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+    margin: 0 0 18px;
+    max-width: 740px;
+  }
+  .about p code {
+    font-family: ui-monospace, Menlo, monospace;
+    background: var(--surface-muted);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .about a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(201, 100, 66, 0.35);
+    transition: border-color 0.15s ease;
+  }
+  .about a:hover { border-bottom-color: var(--accent); }
+  .features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 28px 36px;
+    margin: 36px 0 8px;
+    max-width: 880px;
+  }
+  .feature {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .feature-glyph {
+    font-family: var(--serif);
+    font-size: 28px;
+    color: var(--accent);
+    line-height: 1;
+    flex-shrink: 0;
+    width: 32px;
+    text-align: center;
+  }
+  .feature-body h4 {
+    font-family: var(--serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 16px;
+    margin: 0 0 6px;
+    color: var(--text);
+  }
+  .feature-body p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  .pubs {
+    list-style: none;
+    padding: 0;
+    margin: 16px 0 0;
+  }
+  .pubs li {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .pubs li:last-child { border-bottom: none; }
+  .pubs .pub-id {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .pubs .pub-title {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 12px 24px;
+    margin-top: 24px;
+    max-width: 740px;
+    font-size: 14px;
+  }
+  .meta-grid dt {
+    color: var(--text-muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding-top: 2px;
+  }
+  .meta-grid dd {
+    margin: 0;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .about-footer {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .about-footer .dot { color: var(--text-subtle); }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <img src="assets/sas-logo.png" alt="SAS" class="brand-logo" onerror="this.style.display='none'">
+      <div>
+        <div class="brand-title">map editor</div>
+        <div class="brand-sub">SAS · Nav2 / ROS</div>
+      </div>
+    </div>
+
+    <div class="toolbar" id="toolbar">
+      <button class="icon-btn" id="tool-select" title="Select (V)" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>
+      </button>
+      <button class="icon-btn" id="tool-pan" title="Pan (H or Space+drag)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
+      </button>
+      <div class="toolbar-divider"></div>
+      <span style="font-size:11px; color: var(--text-subtle); text-transform: uppercase; letter-spacing: 0.5px; margin: 0 6px;">draw:</span>
+      <button class="icon-btn target-btn" id="target-wall" data-target="wall" title="Wall (W)" disabled>
+        <span class="target-swatch" style="background:#141413"></span>Wall
+      </button>
+      <button class="icon-btn target-btn" id="target-erase" data-target="erase" title="Erase (E)" disabled>
+        <span class="target-swatch" style="background:#FFFFFF; border:1px solid #93918A;"></span>Erase
+      </button>
+      <button class="icon-btn target-btn" id="target-unscan" data-target="unscan" title="Un-scan (U)" disabled>
+        <span class="target-swatch" style="background:#B3B0A6"></span>Un-scan
+      </button>
+      <button class="icon-btn target-btn" id="target-keepout" data-target="keepout" title="Keep-out (K)" disabled>
+        <span class="target-swatch" style="background:#C96442"></span>Keep-out
+      </button>
+      <div class="toolbar-divider"></div>
+      <button class="icon-btn" id="tool-measure" title="Measure (M)" disabled>Measure</button>
+      <button class="icon-btn" id="tool-origin" title="Move origin (O)" disabled>Origin</button>
+      <button class="icon-btn" id="tool-bucket" title="Bucket fill with current target (G)" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.78.78 2.05.78 2.83 0L19 11Z"/><path d="m5 2 5 5"/><path d="M2 13h15"/><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z"/></svg>
+        Bucket
+      </button>
+      <div class="toolbar-divider"></div>
+      <button class="icon-btn" id="btn-flatten" title="Bake all vector shapes into the raster" disabled>Flatten all</button>
+    </div>
+
+    <div class="topbar-right">
+      <button class="icon-btn subtle" id="btn-theme" title="Toggle theme">
+        <svg id="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg id="theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+      <div class="toolbar-divider"></div>
+      <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+      <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>Redo</button>
+      <div class="toolbar-divider"></div>
+      <button id="btn-save-project" title="Save project (.sasmap.json)" disabled>Save</button>
+      <button id="btn-load-project" title="Load project (.sasmap.json)">Load</button>
+      <button id="btn-download" disabled>Download Map</button>
+    </div>
+  </header>
+
+  <aside class="panel panel-left">
+    <div class="panel-section">
+      <h3>files</h3>
+      <label class="file-drop" id="file-drop">
+        <input type="file" id="file-input" multiple accept=".pgm,.yaml,.yml,.sasmap.json,.json">
+        <strong>Click or drop</strong><br>
+        a <code>.pgm</code> and a <code>.yaml</code>
+      </label>
+      <div class="meta-list" id="loaded-files" style="margin-top: 10px;"></div>
+    </div>
+
+    <div class="panel-section" id="meta-section" style="display:none;">
+      <h3>map metadata</h3>
+      <div class="meta-list" id="map-meta"></div>
+      <div style="margin-top: 10px; display: flex; gap: 6px;">
+        <button class="icon-btn" id="btn-invert" title="Invert map">Invert</button>
+        <button class="icon-btn" id="btn-autolevels" title="Stretch contrast">Auto-levels</button>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <h3>layers</h3>
+      <div class="panel-empty" id="layers-empty">
+        <svg class="panel-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        Layers appear once a map is loaded
+      </div>
+      <div id="layers-list" style="display:none;"></div>
+    </div>
+
+    <div class="panel-section" id="shapes-section" style="display:none;">
+      <h3>shapes</h3>
+      <div class="shape-list" id="shape-list"></div>
+    </div>
+  </aside>
+
+  <main class="canvas-area" id="canvas-area">
+    <canvas id="canvas-map"></canvas>
+    <canvas id="canvas-mask"></canvas>
+    <canvas id="canvas-overlay" class="overlay"></canvas>
+
+    <div class="canvas-empty" id="canvas-empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+      <h2>drop your map here</h2>
+      <p>
+        Drag and drop a <code>.pgm</code> and a <code>.yaml</code> file anywhere
+        on the canvas, or use the panel on the left.
+      </p>
+    </div>
+
+    <div class="canvas-controls">
+      <button id="zoom-in" title="Zoom in">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+      </button>
+      <button id="zoom-out" title="Zoom out">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M8 11h6"/></svg>
+      </button>
+      <button id="zoom-fit" title="Auto-fit">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V4a1 1 0 0 1 1-1h3"/><path d="M17 3h3a1 1 0 0 1 1 1v3"/><path d="M21 17v3a1 1 0 0 1-1 1h-3"/><path d="M7 21H4a1 1 0 0 1-1-1v-3"/></svg>
+      </button>
+    </div>
+
+    <div class="measure-hud" id="measure-hud" style="display:none;"></div>
+  </main>
+
+  <aside class="panel panel-right">
+    <div class="panel-section" id="draw-tool-section" style="display:none;">
+      <h3>draw <span id="draw-target-name" style="color: var(--accent); font-style: normal;"></span></h3>
+      <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+        Pick a shape. The result is an <strong>editable vector object</strong>, baked into the PGM only on
+        <em>Flatten</em> or <em>Download</em>.
+      </div>
+      <div class="shape-toolbar" id="kind-toolbar">
+        <button data-shape-kind="freepath" title="Brush / freehand" class="active">Brush</button>
+        <button data-shape-kind="line" title="Line">Line</button>
+        <button data-shape-kind="polyline" title="Polyline">Polyline</button>
+        <button data-shape-kind="rect" title="Rectangle">Rect</button>
+        <button data-shape-kind="rrect" title="Rotated rectangle">RRect</button>
+        <button data-shape-kind="polygon" title="Polygon">Polygon</button>
+        <button data-shape-kind="circle" title="Circle">Circle</button>
+        <button data-shape-kind="ellipse" title="Ellipse">Ellipse</button>
+        <button data-shape-kind="arc" title="Arc">Arc</button>
+        <button data-shape-kind="bezier" title="Bezier">Bezier</button>
+      </div>
+      <h4>style</h4>
+      <div class="prop-row">
+        <label>Width</label>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <input type="range" id="shape-width-slider" min="1" max="64" value="4">
+          <span id="shape-width-val" style="font-family: ui-monospace, Menlo, monospace; font-size: 11px; min-width: 40px;">4 px</span>
+        </div>
+      </div>
+      <div class="prop-row">
+        <label>Fill</label>
+        <select id="shape-style">
+          <option value="stroke">Outline</option>
+          <option value="fill">Filled</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel-section" id="props-section">
+      <h3>properties</h3>
+      <div class="panel-empty" id="props-empty">
+        <svg class="panel-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        Select a shape or pick a tool
+      </div>
+      <div id="props-content" style="display:none;"></div>
+    </div>
+
+    <div class="panel-section">
+      <h3>options</h3>
+      <label class="checkbox" style="display: flex; margin-bottom: 6px;">
+        <input type="checkbox" id="opt-snap"> Snap to grid
+      </label>
+      <div class="prop-row" id="snap-row" style="display:none;">
+        <label>Step (m)</label>
+        <input type="number" id="snap-step" value="0.1" min="0.01" step="0.01">
+      </div>
+      <label class="checkbox" style="display: flex; margin-bottom: 6px;">
+        <input type="checkbox" id="opt-grid"> Show grid
+      </label>
+      <label class="checkbox" style="display: flex; margin-bottom: 6px;">
+        <input type="checkbox" id="opt-show-origin" checked> Show origin marker
+      </label>
+    </div>
+
+    <div class="panel-section">
+      <h3>shortcuts</h3>
+      <div class="meta-list" style="line-height: 1.85;">
+        <div><span class="kbd">V</span> select · <span class="kbd">H</span> pan</div>
+        <div><span class="kbd">W</span> wall · <span class="kbd">E</span> erase</div>
+        <div><span class="kbd">U</span> unscan · <span class="kbd">K</span> keep-out</div>
+        <div><span class="kbd">M</span> measure · <span class="kbd">O</span> origin · <span class="kbd">G</span> bucket</div>
+        <div><span class="kbd">B</span> brush · <span class="kbd">L</span> line · <span class="kbd">R</span> rect</div>
+        <div><span class="kbd">Space</span>+drag pan · <span class="kbd">Shift</span>+scroll zoom</div>
+        <div><span class="kbd">Shift</span> while drawing · constrain</div>
+        <div><span class="kbd">Ctrl+Z</span> / <span class="kbd">Ctrl+Y</span> undo/redo</div>
+        <div><span class="kbd">Ctrl+D</span> duplicate · <span class="kbd">Del</span> delete</div>
+        <div><span class="kbd">Esc</span> / right-click · cancel</div>
+        <div><span class="kbd">F</span> fit · <span class="kbd">[</span> <span class="kbd">]</span> width</div>
+      </div>
+    </div>
+  </aside>
+
+  <footer class="statusbar">
+    <div class="status-item"><span class="label">px:</span><span class="val" id="status-px">—</span></div>
+    <div class="status-item"><span class="label">world:</span><span class="val" id="status-world">—</span></div>
+    <div class="status-spacer"></div>
+    <div class="status-item"><span class="label">selection:</span><span class="val" id="status-sel">none</span></div>
+    <div class="status-item"><span class="label">zoom:</span><span class="val" id="status-zoom">100%</span></div>
+    <div class="status-item"><span class="label">tool:</span><span class="val" id="status-tool">pan</span></div>
+  </footer>
+
+</div>
+
+<section class="about" id="about">
+  <div class="about-inner">
+    <h2>About</h2>
+    <p>
+      A lightweight, dependency-free editor for editing ROS occupancy grid maps directly in the browser.
+      Built for Nav2-based navigation pipelines that occasionally need a clean way to fix a noisy SLAM
+      output, add a missing wall, mark a keep-out zone, or set a meaningful world origin, without leaving
+      the browser and without committing irreversible changes to a raster file.
+    </p>
+    <p>
+      Every drawing operation is a non-destructive vector object. Walls, erasures, un-scanned regions and
+      keep-out zones are all editable shapes that stay editable until you explicitly flatten them or
+      export. Lines, rectangles, polygons, circles, arcs and bezier curves can be moved, resized,
+      duplicated or deleted at any point in the workflow. The original PGM is touched only on export.
+    </p>
+    <p>
+      Everything runs locally in the browser. The editor parses <code>.pgm</code> map images and
+      <code>.yaml</code> map metadata natively, respecting the standard ROS conventions (resolution,
+      origin, bottom-left image anchoring). Exports include the edited <code>.pgm</code> and
+      <code>.yaml</code>, plus an optional <code>_keepout</code> pair compatible with the Nav2 keep-out
+      filter, ready to drop into a launch file.
+    </p>
+
+    <div class="features">
+      <div class="feature">
+        <span class="feature-glyph">◆</span>
+        <div class="feature-body">
+          <h4>Non-destructive editing</h4>
+          <p>Every wall, erase or keep-out is a vector object, fully editable until you flatten or download.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-glyph">✎</span>
+        <div class="feature-body">
+          <h4>Ten shape primitives</h4>
+          <p>Brush, line, polyline, rect, rotated rect, polygon, circle, ellipse, arc, bezier.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-glyph">⊕</span>
+        <div class="feature-body">
+          <h4>Editable map origin</h4>
+          <p>Place world (0,0) anywhere on the map, by click, drag, pixel input, or raw YAML coordinates.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-glyph">⇆</span>
+        <div class="feature-body">
+          <h4>Round-trip projects</h4>
+          <p>Save your editing session as <code>.sasmap.json</code> and resume later with shapes intact.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-glyph">⊞</span>
+        <div class="feature-body">
+          <h4>Keep-out filter ready</h4>
+          <p>A second raster channel for the Nav2 keep-out filter, exported only when needed.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-glyph">⌘</span>
+        <div class="feature-body">
+          <h4>Snap, measure, undo</h4>
+          <p>Metric snapping, live distance measurement in meters, fifty step undo history.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>Foundation</h3>
+    <p>
+      This editor is a tool built in support of the Semantic Autonomy Stack (SAS), a layered architecture
+      for mobile robot autonomy that combines geometric navigation with semantic memory and
+      language-based reasoning. SAS is the subject of two open-access publications:
+    </p>
+    <ul class="pubs">
+      <li>
+        <span class="pub-id"><a href="https://www.mdpi.com/1424-8220/26/7/2232" target="_blank" rel="noopener">MDPI Sensors</a> · doi:10.3390/s26072232</span>
+        <span class="pub-title">Angular Sector Fusion and semantic route planning for autonomous mobile robots</span>
+      </li>
+      <li>
+        <span class="pub-id"><a href="https://arxiv.org/abs/2605.02525" target="_blank" rel="noopener">arXiv:2605.02525</a></span>
+        <span class="pub-title">Cross-robot semantic memory transfer experiments in the SAS framework</span>
+      </li>
+    </ul>
+
+    <dl class="meta-grid">
+      <dt>Author</dt>             <dd>STAICU Andrei-Alexandru</dd>
+      <dt>Thesis coordinator</dt> <dd>Conf. dr. ing. ABAZA Bogdan-Felician</dd>
+      <dt>Affiliation</dt>        <dd>National University of Science and Technology Politehnica Bucharest, FIIR</dd>
+      <dt>Part of</dt>            <dd>The Semantic Autonomy Stack</dd>
+    </dl>
+
+    <div class="about-footer">
+      <span>MIT License</span>
+      <span class="dot">·</span>
+      <a href="https://github.com/andrei-staicu/sas-map-editor" target="_blank" rel="noopener">Source on GitHub</a>
+      <span class="dot">·</span>
+      <a href="https://github.com/andrei-staicu/nav2-graph-editor" target="_blank" rel="noopener">Companion: nav2-graph-editor</a>
+    </div>
+  </div>
+</section>
+
+<script>
+'use strict';
+
+// ============================================================
+// === STATE ===
+// ============================================================
+
+const state = {
+  // raster map
+  map: null,         // { width, height, maxval, data: Uint8Array }
+  mapDirty: false,   // raster modified since load
+  // keepout mask raster (same size as map). Lazy-created on first keep-out paint.
+  mask: null,
+  maskDirty: false,
+  // YAML metadata
+  meta: null,
+  fileNames: { pgm: null, yaml: null, maskPgm: null, maskYaml: null },
+
+  // viewport
+  zoom: 1.0,
+  pan: { x: 0, y: 0 },
+
+  // interaction
+  tool: 'pan',
+  currentTarget: 'wall',   // wall | erase | unscan | keepout
+  currentKind: 'freepath', // freepath | line | polyline | rect | rrect | polygon | circle | ellipse | arc | bezier
+  brushWidth: 4,           // width in map px for new shapes
+  shapeStyle: 'stroke',    // stroke | fill
+  spaceDown: false,
+  shiftDown: false,
+  ctrlDown: false,
+  isPanning: false,
+  panStart: null,
+
+  // theme
+  theme: 'dark',           // dark | light
+
+  // raster drawing transient state (UNUSED in vector-first mode, kept for compat)
+  rasterDraw: null,
+
+  // measure
+  measure: null,     // { aMap: {x,y}, bMap: {x,y} }
+
+  // origin drag
+  originDrag: null,  // { startMx, startMy, origOriginX, origOriginY }
+
+  // vector shapes (canonical store)
+  shapes: new Map(), // id -> shape
+  nextShapeId: 1,
+  selection: new Set(), // shape ids
+  hoverShape: null,
+  hoverHandle: null,    // { shapeId, handle }
+  shapeDraw: null,      // { kind, points, draggingPoint, startMapPx }
+  shapeDragMove: null,  // { startMapPx, origPositions: Map<id, snapshot> }
+  shapeHandleDrag: null,// { shapeId, handle, startMapPx, orig }
+  shapeRotateDrag: null,
+  boxSelect: null,      // { startMapPx, currentMapPx }
+
+  // layers config
+  layers: {
+    map:    { visible: true, opacity: 1.0, locked: false, name: 'Map (raster)' },
+    mask:   { visible: true, opacity: 0.55, locked: false, name: 'Keep-out (raster)' },
+    vector: { visible: true, opacity: 1.0, locked: false, name: 'Vector overlay' },
+  },
+
+  // options
+  snap: false,
+  snapStep: 0.1,
+  showGrid: false,
+  showOrigin: true,
+  showMask: true,
+
+  // history
+  history: [],
+  historyIndex: -1,
+};
+
+// ============================================================
+// === DOM REFS ===
+// ============================================================
+
+const canvasArea  = document.getElementById('canvas-area');
+const canvasEmpty = document.getElementById('canvas-empty');
+const canvasMap   = document.getElementById('canvas-map');
+const canvasMask  = document.getElementById('canvas-mask');
+const canvasOver  = document.getElementById('canvas-overlay');
+const ctxMap      = canvasMap.getContext('2d');
+const ctxMask     = canvasMask.getContext('2d');
+const ctxOver     = canvasOver.getContext('2d');
+
+const measureHud = document.getElementById('measure-hud');
+
+const elStatusPx    = document.getElementById('status-px');
+const elStatusWorld = document.getElementById('status-world');
+const elStatusZoom  = document.getElementById('status-zoom');
+const elStatusTool  = document.getElementById('status-tool');
+const elStatusSel   = document.getElementById('status-sel');
+
+// ============================================================
+// === RESIZE ===
+// ============================================================
+
+function resizeCanvases() {
+  const rect = canvasArea.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  [canvasMap, canvasMask, canvasOver].forEach(c => {
+    c.style.width  = rect.width + 'px';
+    c.style.height = rect.height + 'px';
+    c.width  = Math.round(rect.width  * dpr);
+    c.height = Math.round(rect.height * dpr);
+  });
+  [ctxMap, ctxMask, ctxOver].forEach(ctx => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  });
+  redraw();
+}
+window.addEventListener('resize', resizeCanvases);
+
+
+// ============================================================
+// === FILE LOADING ===
+// ============================================================
+
+const fileInput = document.getElementById('file-input');
+const fileDrop  = document.getElementById('file-drop');
+const loadedFilesEl = document.getElementById('loaded-files');
+
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+fileDrop.addEventListener('dragover', e => { e.preventDefault(); fileDrop.classList.add('dragover'); });
+fileDrop.addEventListener('dragleave', () => fileDrop.classList.remove('dragover'));
+fileDrop.addEventListener('drop', e => {
+  e.preventDefault(); fileDrop.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+canvasArea.addEventListener('dragover', e => {
+  e.preventDefault();
+  canvasEmpty.classList.add('dragover');
+});
+canvasArea.addEventListener('dragleave', e => {
+  if (!canvasArea.contains(e.relatedTarget)) canvasEmpty.classList.remove('dragover');
+});
+canvasArea.addEventListener('drop', e => {
+  e.preventDefault();
+  canvasEmpty.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+
+document.getElementById('btn-load-project').onclick = () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,.sasmap.json';
+  input.onchange = e => handleFiles(e.target.files);
+  input.click();
+};
+
+async function handleFiles(files) {
+  if (!files || !files.length) return;
+  const list = Array.from(files);
+
+  // .sasmap.json overrides everything else
+  const projectFile = list.find(f => /\.(sasmap\.json|json)$/i.test(f.name));
+  if (projectFile) {
+    try {
+      const text = await projectFile.text();
+      await loadProject(JSON.parse(text));
+    } catch (err) {
+      console.error(err);
+      alert('Failed to load project: ' + err.message);
+    }
+    return;
+  }
+
+  const pgms  = list.filter(f => /\.pgm$/i.test(f.name));
+  const yamls = list.filter(f => /\.ya?ml$/i.test(f.name));
+  const isKeepout = name => /_keepout\.(pgm|ya?ml)$/i.test(name);
+
+  const mapPgm   = pgms.find(f => !isKeepout(f.name));
+  const maskPgm  = pgms.find(f =>  isKeepout(f.name));
+  const mapYaml  = yamls.find(f => !isKeepout(f.name));
+  const maskYaml = yamls.find(f =>  isKeepout(f.name));
+
+  try {
+    if (mapYaml) {
+      const text = await mapYaml.text();
+      state.meta = parseYaml(text);
+      state.fileNames.yaml = mapYaml.name;
+    }
+    if (mapPgm) {
+      const buf = await mapPgm.arrayBuffer();
+      state.map = parsePgm(new Uint8Array(buf));
+      state.mapDirty = false;
+      state.fileNames.pgm = mapPgm.name;
+    }
+    if (maskYaml) state.fileNames.maskYaml = maskYaml.name;
+    if (maskPgm) {
+      const buf = await maskPgm.arrayBuffer();
+      state.mask = parsePgm(new Uint8Array(buf));
+      state.maskDirty = false;
+      state.fileNames.maskPgm = maskPgm.name;
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Failed to load files: ' + err.message);
+    return;
+  }
+
+  if (!state.meta) {
+    // create default meta if user only loaded PGM
+    state.meta = {
+      image: state.fileNames.pgm || 'map.pgm',
+      mode: 'trinary', resolution: 0.05, origin: [0,0,0],
+      negate: 0, occupied_thresh: 0.65, free_thresh: 0.25,
+    };
+  }
+  if (state.map && !state.mask) {
+    // mask defaults to "no keepout anywhere" = all white
+    state.mask = { width: state.map.width, height: state.map.height, maxval: 255,
+      data: new Uint8Array(state.map.width * state.map.height).fill(255) };
+  }
+
+  finishLoading();
+}
+
+function finishLoading() {
+  updateLoadedFilesUi();
+  updateMetaUi();
+  updateLayersUi();
+  if (state.map) {
+    canvasEmpty.style.display = 'none';
+    autoFit();
+    enableAllTools();
+    saveHistory('Load map');
+  }
+}
+
+function updateLoadedFilesUi() {
+  const lines = [];
+  if (state.fileNames.pgm)      lines.push(`<div><span class="key">pgm:</span> <span class="val">${escapeHtml(state.fileNames.pgm)}</span></div>`);
+  if (state.fileNames.yaml)     lines.push(`<div><span class="key">yaml:</span> <span class="val">${escapeHtml(state.fileNames.yaml)}</span></div>`);
+  if (state.fileNames.maskPgm)  lines.push(`<div><span class="key">keepout pgm:</span> <span class="val">${escapeHtml(state.fileNames.maskPgm)}</span></div>`);
+  if (state.fileNames.maskYaml) lines.push(`<div><span class="key">keepout yaml:</span> <span class="val">${escapeHtml(state.fileNames.maskYaml)}</span></div>`);
+  loadedFilesEl.innerHTML = lines.join('');
+}
+
+function updateMetaUi() {
+  const sec = document.getElementById('meta-section');
+  const el  = document.getElementById('map-meta');
+  if (!state.map || !state.meta) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  const m = state.meta, map = state.map;
+  const wMeters = (map.width  * m.resolution).toFixed(2);
+  const hMeters = (map.height * m.resolution).toFixed(2);
+  el.innerHTML = `
+    <div><span class="key">size:</span> <span class="val">${map.width} × ${map.height} px</span></div>
+    <div><span class="key">world:</span> <span class="val">${wMeters} × ${hMeters} m</span></div>
+    <div><span class="key">res:</span> <span class="val">${m.resolution} m/px</span></div>
+    <div><span class="key">origin:</span> <span class="val">[${m.origin[0].toFixed(3)}, ${m.origin[1].toFixed(3)}, ${m.origin[2].toFixed(3)}]</span></div>
+    <div><span class="key">mode:</span> <span class="val">${m.mode}</span></div>
+    <div><span class="key">negate:</span> <span class="val">${m.negate}</span></div>
+    <div><span class="key">thresh:</span> <span class="val">occ ${m.occupied_thresh} / free ${m.free_thresh}</span></div>
+  `;
+}
+
+function enableAllTools() {
+  ['tool-select','tool-pan','target-wall','target-erase','target-unscan','target-keepout',
+   'tool-measure','tool-origin','tool-bucket','btn-flatten',
+   'btn-undo','btn-redo','btn-save-project','btn-download'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = false;
+  });
+  updateUndoRedoUi();
+}
+
+
+// ============================================================
+// === YAML & PGM PARSING ===
+// ============================================================
+
+function parseYaml(text) {
+  const out = {
+    image: null, mode: 'trinary', resolution: 0.05, origin: [0,0,0],
+    negate: 0, occupied_thresh: 0.65, free_thresh: 0.25,
+  };
+  const lines = text.split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i];
+    const line = raw.replace(/#.*$/, '').trimEnd();
+    i++;
+    if (!line.trim()) continue;
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    let val = m[2].trim();
+    if (val === '' && key === 'origin') {
+      const arr = [];
+      while (i < lines.length && /^\s*-\s/.test(lines[i])) {
+        arr.push(parseFloat(lines[i].replace(/^\s*-\s*/, '')));
+        i++;
+      }
+      out.origin = arr; continue;
+    }
+    if (key === 'origin') {
+      const cleaned = val.replace(/^\[/, '').replace(/\]$/, '');
+      out.origin = cleaned.split(',').map(s => parseFloat(s.trim()));
+      continue;
+    }
+    if (['resolution','negate','occupied_thresh','free_thresh'].includes(key)) {
+      out[key] = parseFloat(val); continue;
+    }
+    if (key === 'mode' || key === 'image') {
+      out[key] = val.replace(/^["']/, '').replace(/["']$/, ''); continue;
+    }
+  }
+  while (out.origin.length < 3) out.origin.push(0);
+  return out;
+}
+
+function parsePgm(bytes) {
+  let pos = 0;
+  function readToken() {
+    while (pos < bytes.length) {
+      const b = bytes[pos];
+      if (b === 0x23) {
+        while (pos < bytes.length && bytes[pos] !== 0x0A) pos++;
+      } else if (b === 0x20 || b === 0x09 || b === 0x0A || b === 0x0D) pos++;
+      else break;
+    }
+    const start = pos;
+    while (pos < bytes.length) {
+      const b = bytes[pos];
+      if (b === 0x20 || b === 0x09 || b === 0x0A || b === 0x0D) break;
+      pos++;
+    }
+    return String.fromCharCode(...bytes.subarray(start, pos));
+  }
+  const magic = readToken();
+  if (magic !== 'P5' && magic !== 'P2') throw new Error(`Unsupported PGM magic: ${magic}`);
+  const width  = parseInt(readToken(), 10);
+  const height = parseInt(readToken(), 10);
+  const maxval = parseInt(readToken(), 10);
+  if (!width || !height || !maxval) throw new Error('Bad PGM header');
+  pos++;
+  const total = width * height;
+  let data;
+  if (magic === 'P5') {
+    if (maxval < 256) {
+      data = new Uint8Array(bytes.subarray(pos, pos + total));
+      if (data.length !== total) throw new Error('PGM truncated');
+    } else {
+      const raw = bytes.subarray(pos, pos + total * 2);
+      data = new Uint8Array(total);
+      for (let i = 0; i < total; i++) {
+        const v = (raw[i*2] << 8) | raw[i*2+1];
+        data[i] = Math.round(v * 255 / maxval);
+      }
+    }
+  } else {
+    data = new Uint8Array(total);
+    let idx = 0;
+    while (idx < total && pos < bytes.length) {
+      const tok = readToken();
+      if (!tok) break;
+      const v = parseInt(tok, 10);
+      data[idx++] = (maxval === 255) ? v : Math.round(v * 255 / maxval);
+    }
+  }
+  return { width, height, maxval, data };
+}
+
+// Serialize a single-channel Uint8Array to a P5 PGM Blob.
+function pgmToBlob(map) {
+  const header = `P5\n${map.width} ${map.height}\n255\n`;
+  const headerBytes = new TextEncoder().encode(header);
+  const out = new Uint8Array(headerBytes.length + map.data.length);
+  out.set(headerBytes, 0);
+  out.set(map.data, headerBytes.length);
+  return new Blob([out], { type: 'image/x-portable-graymap' });
+}
+
+function yamlToText(meta, imageFilename) {
+  return `image: ${imageFilename}
+mode: ${meta.mode}
+resolution: ${meta.resolution}
+origin: [${meta.origin[0]}, ${meta.origin[1]}, ${meta.origin[2]}]
+negate: ${meta.negate}
+occupied_thresh: ${meta.occupied_thresh}
+free_thresh: ${meta.free_thresh}
+`;
+}
+
+
+// ============================================================
+// === IMAGE DATA (for fast canvas rendering) ===
+// ============================================================
+
+let _mapImageData = null;
+let _maskImageData = null;
+let _mapOffscreen = null;
+let _maskOffscreen = null;
+
+function rebuildMapImageData() {
+  if (!state.map) { _mapImageData = null; _mapOffscreen = null; return; }
+  const { width, height, data } = state.map;
+  const negate = state.meta && state.meta.negate ? 1 : 0;
+  const img = new ImageData(width, height);
+  const out = img.data;
+  for (let i = 0, j = 0; i < data.length; i++, j += 4) {
+    const v = negate ? (255 - data[i]) : data[i];
+    out[j]=v; out[j+1]=v; out[j+2]=v; out[j+3]=255;
+  }
+  _mapImageData = img;
+  _mapOffscreen = document.createElement('canvas');
+  _mapOffscreen.width = width; _mapOffscreen.height = height;
+  _mapOffscreen.getContext('2d').putImageData(img, 0, 0);
+}
+
+function rebuildMaskImageData() {
+  if (!state.mask) { _maskImageData = null; _maskOffscreen = null; return; }
+  const { width, height, data } = state.mask;
+  const img = new ImageData(width, height);
+  const out = img.data;
+  const r = 201, g = 100, b = 66;
+  for (let i = 0, j = 0; i < data.length; i++, j += 4) {
+    const alpha = Math.round((255 - data[i]) * 0.55);
+    out[j]=r; out[j+1]=g; out[j+2]=b; out[j+3]=alpha;
+  }
+  _maskImageData = img;
+  _maskOffscreen = document.createElement('canvas');
+  _maskOffscreen.width = width; _maskOffscreen.height = height;
+  _maskOffscreen.getContext('2d').putImageData(img, 0, 0);
+}
+
+// Patch a small rectangular region of the offscreen image (faster than full rebuild).
+function patchMapOffscreen(x0, y0, x1, y1) {
+  if (!state.map || !_mapOffscreen) return;
+  const w = state.map.width, h = state.map.height;
+  x0 = Math.max(0, Math.floor(x0));
+  y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(w, Math.ceil(x1));
+  y1 = Math.min(h, Math.ceil(y1));
+  if (x1 <= x0 || y1 <= y0) return;
+  const rw = x1 - x0, rh = y1 - y0;
+  const img = new ImageData(rw, rh);
+  const negate = state.meta && state.meta.negate ? 1 : 0;
+  const src = state.map.data;
+  const dst = img.data;
+  for (let yy = 0; yy < rh; yy++) {
+    for (let xx = 0; xx < rw; xx++) {
+      const i = (y0 + yy) * w + (x0 + xx);
+      const v = negate ? (255 - src[i]) : src[i];
+      const j = (yy * rw + xx) * 4;
+      dst[j]=v; dst[j+1]=v; dst[j+2]=v; dst[j+3]=255;
+    }
+  }
+  _mapOffscreen.getContext('2d').putImageData(img, x0, y0);
+}
+
+function patchMaskOffscreen(x0, y0, x1, y1) {
+  if (!state.mask || !_maskOffscreen) return;
+  const w = state.mask.width, h = state.mask.height;
+  x0 = Math.max(0, Math.floor(x0));
+  y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(w, Math.ceil(x1));
+  y1 = Math.min(h, Math.ceil(y1));
+  if (x1 <= x0 || y1 <= y0) return;
+  const rw = x1 - x0, rh = y1 - y0;
+  const img = new ImageData(rw, rh);
+  const src = state.mask.data;
+  const dst = img.data;
+  const r = 201, g = 100, b = 66;
+  for (let yy = 0; yy < rh; yy++) {
+    for (let xx = 0; xx < rw; xx++) {
+      const i = (y0 + yy) * w + (x0 + xx);
+      const alpha = Math.round((255 - src[i]) * 0.55);
+      const j = (yy * rw + xx) * 4;
+      dst[j]=r; dst[j+1]=g; dst[j+2]=b; dst[j+3]=alpha;
+    }
+  }
+  _maskOffscreen.getContext('2d').putImageData(img, x0, y0);
+}
+
+
+// ============================================================
+// === COORDINATE CONVERSION ===
+// ============================================================
+// Conventions:
+// - "map px" = pixel coordinates inside the PGM, origin top-left, +x right, +y down.
+// - "world" = Nav2 world frame in meters. world_x = origin_x + map_x*res;
+//   world_y = origin_y + (height - map_y)*res. (PGM bottom-left = world origin.)
+// - "canvas" = CSS pixel coordinates relative to canvas-area.
+
+function mouseToCanvas(e) {
+  const rect = canvasArea.getBoundingClientRect();
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+function canvasToMapPx(cx, cy) {
+  return { x: (cx - state.pan.x) / state.zoom, y: (cy - state.pan.y) / state.zoom };
+}
+function mapPxToCanvas(mx, my) {
+  return { x: state.pan.x + mx * state.zoom, y: state.pan.y + my * state.zoom };
+}
+function mapPxToWorld(px, py) {
+  if (!state.meta || !state.map) return { x: 0, y: 0 };
+  const res = state.meta.resolution;
+  const [ox, oy] = state.meta.origin;
+  return { x: ox + px * res, y: oy + (state.map.height - py) * res };
+}
+function worldToMapPx(wx, wy) {
+  if (!state.meta || !state.map) return { x: 0, y: 0 };
+  const res = state.meta.resolution;
+  const [ox, oy] = state.meta.origin;
+  return { x: (wx - ox) / res, y: state.map.height - (wy - oy) / res };
+}
+
+function snapMapPx(p) {
+  if (!state.snap || !state.meta) return p;
+  const stepPx = state.snapStep / state.meta.resolution;
+  return { x: Math.round(p.x / stepPx) * stepPx, y: Math.round(p.y / stepPx) * stepPx };
+}
+
+// Apply Shift-constraint to a vector (dx, dy): snap angle to 0/45/90 deg.
+function constrainShift(dx, dy) {
+  const a = Math.atan2(dy, dx);
+  const step = Math.PI / 4;
+  const snapped = Math.round(a / step) * step;
+  const r = Math.hypot(dx, dy);
+  return { dx: r * Math.cos(snapped), dy: r * Math.sin(snapped) };
+}
+
+// ============================================================
+// === VIEWPORT ===
+// ============================================================
+
+function autoFit() {
+  if (!state.map) return;
+  const rect = canvasArea.getBoundingClientRect();
+  const pad = 40;
+  const sx = (rect.width  - pad * 2) / state.map.width;
+  const sy = (rect.height - pad * 2) / state.map.height;
+  state.zoom = Math.min(sx, sy);
+  state.pan.x = (rect.width  - state.map.width  * state.zoom) / 2;
+  state.pan.y = (rect.height - state.map.height * state.zoom) / 2;
+  redraw();
+}
+function zoomBy(factor, anchor) {
+  if (!state.map) return;
+  const rect = canvasArea.getBoundingClientRect();
+  const ax = anchor ? anchor.x : rect.width  / 2;
+  const ay = anchor ? anchor.y : rect.height / 2;
+  const mp = canvasToMapPx(ax, ay);
+  state.zoom = Math.max(0.05, Math.min(64, state.zoom * factor));
+  state.pan.x = ax - mp.x * state.zoom;
+  state.pan.y = ay - mp.y * state.zoom;
+  redraw();
+}
+document.getElementById('zoom-in').onclick  = () => zoomBy(1.25, null);
+document.getElementById('zoom-out').onclick = () => zoomBy(1/1.25, null);
+document.getElementById('zoom-fit').onclick = autoFit;
+canvasArea.addEventListener('wheel', e => {
+  if (!state.map) return;
+  if (e.shiftKey) {
+    e.preventDefault();
+    const c = mouseToCanvas(e);
+    const factor = e.deltaY < 0 ? 1.12 : 1/1.12;
+    zoomBy(factor, c);
+  }
+}, { passive: false });
+
+
+// ============================================================
+// === RASTER PAINTING (low-level pixel ops) ===
+// ============================================================
+// Each tool writes either to state.map.data or state.mask.data.
+// Raster value per tool target (in PGM pixel space, 0..255):
+//   wall    → map: 0 (occupied)
+//   erase   → map: 255 (free), and mask: 255 (no keepout)
+//   unscan  → map: 205 (unknown, classic ROS map convention)
+//   keepout → mask: 0 (keepout)
+
+const TARGET_INFO = {
+  wall:    { layer: 'map',  value: 0,   label: 'Wall',     color: '#141413' },
+  erase:   { layer: 'map',  value: 255, label: 'Erase',    color: '#93918A' },
+  unscan:  { layer: 'map',  value: 205, label: 'Un-Scan',  color: '#B3B0A6' },
+  keepout: { layer: 'mask', value: 0,   label: 'Keep-Out', color: '#C96442' },
+};
+
+function getTargetBuf(target) {
+  const info = TARGET_INFO[target];
+  if (!info) return null;
+  if (info.layer === 'map')  return state.map;
+  if (info.layer === 'mask') {
+    if (!state.mask && state.map) {
+      state.mask = { width: state.map.width, height: state.map.height, maxval: 255,
+        data: new Uint8Array(state.map.width * state.map.height).fill(255) };
+      rebuildMaskImageData();
+    }
+    return state.mask;
+  }
+}
+
+function markRasterDirty(target) {
+  if (target === 'keepout') state.maskDirty = true;
+  else state.mapDirty = true;
+}
+
+// Draw a filled disc of given radius (px) into the buffer.
+function rasterDisc(buf, cx, cy, r, value) {
+  if (!buf) return null;
+  const w = buf.width, h = buf.height;
+  const x0 = Math.max(0, Math.floor(cx - r));
+  const y0 = Math.max(0, Math.floor(cy - r));
+  const x1 = Math.min(w - 1, Math.ceil(cx + r));
+  const y1 = Math.min(h - 1, Math.ceil(cy + r));
+  const r2 = r * r;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+      if (dx*dx + dy*dy <= r2) buf.data[y * w + x] = value;
+    }
+  }
+  return { x0, y0, x1: x1 + 1, y1: y1 + 1 };
+}
+
+// Draw a thick line (round caps) from (x0,y0) to (x1,y1) with given radius.
+// For very small radii (r < 1), we additionally rasterize the 1-px center line
+// using Bresenham so we don't lose pixels when discs are sub-pixel sized.
+function rasterLine(buf, x0, y0, x1, y1, r, value) {
+  if (!buf) return null;
+  const dx = x1 - x0, dy = y1 - y0;
+  const len = Math.hypot(dx, dy);
+  // Need at least one disc every (r) pixels for full coverage of the swept area;
+  // empirically, 2 discs per radius keeps the disc-overlap watertight even at r=0.5.
+  const stepPerPx = Math.max(2, Math.ceil(2 / Math.max(0.5, r)));
+  const steps = Math.max(1, Math.ceil(len * stepPerPx));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const merge = b => {
+    if (!b) return;
+    if (b.x0 < minX) minX = b.x0; if (b.y0 < minY) minY = b.y0;
+    if (b.x1 > maxX) maxX = b.x1; if (b.y1 > maxY) maxY = b.y1;
+  };
+  // Always paint endpoints
+  merge(rasterDisc(buf, x0, y0, r, value));
+  merge(rasterDisc(buf, x1, y1, r, value));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    merge(rasterDisc(buf, x0 + dx * t, y0 + dy * t, r, value));
+  }
+  // For sub-1px radius, additionally run Bresenham to guarantee no skipped pixels
+  if (r < 1.0) {
+    merge(bresenhamLine(buf, x0, y0, x1, y1, value));
+  }
+  if (!isFinite(minX)) return null;
+  return { x0: minX, y0: minY, x1: maxX, y1: maxY };
+}
+
+// Classic Bresenham, paints exactly one pixel per cell along the line.
+function bresenhamLine(buf, x0, y0, x1, y1, value) {
+  const w = buf.width, h = buf.height;
+  let xi = Math.round(x0), yi = Math.round(y0);
+  const xt = Math.round(x1), yt = Math.round(y1);
+  const dx = Math.abs(xt - xi), dy = Math.abs(yt - yi);
+  const sx = xi < xt ? 1 : -1;
+  const sy = yi < yt ? 1 : -1;
+  let err = dx - dy;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let guard = 0;
+  while (true) {
+    if (xi >= 0 && xi < w && yi >= 0 && yi < h) {
+      buf.data[yi * w + xi] = value;
+      if (xi < minX) minX = xi; if (yi < minY) minY = yi;
+      if (xi + 1 > maxX) maxX = xi + 1; if (yi + 1 > maxY) maxY = yi + 1;
+    }
+    if (xi === xt && yi === yt) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) { err -= dy; xi += sx; }
+    if (e2 <  dx) { err += dx; yi += sy; }
+    if (++guard > 100000) break;
+  }
+  return isFinite(minX) ? { x0: minX, y0: minY, x1: maxX, y1: maxY } : null;
+}
+
+// Filled or outlined rectangle (axis-aligned in map px) with rounded line width.
+function rasterRect(buf, x0, y0, x1, y1, r, value, filled) {
+  if (!buf) return null;
+  const xa = Math.min(x0, x1), xb = Math.max(x0, x1);
+  const ya = Math.min(y0, y1), yb = Math.max(y0, y1);
+  if (filled) {
+    const ix0 = Math.max(0, Math.floor(xa));
+    const iy0 = Math.max(0, Math.floor(ya));
+    const ix1 = Math.min(buf.width - 1, Math.ceil(xb));
+    const iy1 = Math.min(buf.height - 1, Math.ceil(yb));
+    const w = buf.width;
+    for (let y = iy0; y <= iy1; y++) {
+      const row = y * w;
+      for (let x = ix0; x <= ix1; x++) buf.data[row + x] = value;
+    }
+    return { x0: ix0, y0: iy0, x1: ix1 + 1, y1: iy1 + 1 };
+  } else {
+    let b = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    function merge(b2) {
+      if (!b2) return;
+      if (b2.x0 < b.x0) b.x0 = b2.x0; if (b2.y0 < b.y0) b.y0 = b2.y0;
+      if (b2.x1 > b.x1) b.x1 = b2.x1; if (b2.y1 > b.y1) b.y1 = b2.y1;
+    }
+    merge(rasterLine(buf, xa, ya, xb, ya, r, value));
+    merge(rasterLine(buf, xb, ya, xb, yb, r, value));
+    merge(rasterLine(buf, xb, yb, xa, yb, r, value));
+    merge(rasterLine(buf, xa, yb, xa, ya, r, value));
+    return isFinite(b.x0) ? b : null;
+  }
+}
+
+// After a raster mutation, update the corresponding offscreen and redraw.
+function applyRasterPatch(target, bbox) {
+  if (!bbox) return;
+  if (target === 'keepout') patchMaskOffscreen(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
+  else patchMapOffscreen(bbox.x0, bbox.y0, bbox.x1, bbox.y1);
+  markRasterDirty(target);
+}
+
+// Invert map values (black ↔ white).
+function invertMap() {
+  if (!state.map) return;
+  const d = state.map.data;
+  for (let i = 0; i < d.length; i++) d[i] = 255 - d[i];
+  rebuildMapImageData();
+  state.mapDirty = true;
+  saveHistory('Invert map');
+  redraw();
+}
+
+function autoLevels() {
+  if (!state.map) return;
+  const d = state.map.data;
+  let mn = 255, mx = 0;
+  for (let i = 0; i < d.length; i++) {
+    if (d[i] < mn) mn = d[i];
+    if (d[i] > mx) mx = d[i];
+  }
+  if (mx <= mn) return;
+  const scale = 255 / (mx - mn);
+  for (let i = 0; i < d.length; i++) d[i] = Math.round((d[i] - mn) * scale);
+  rebuildMapImageData();
+  state.mapDirty = true;
+  saveHistory('Auto-levels');
+  redraw();
+}
+
+document.getElementById('btn-invert').onclick     = invertMap;
+document.getElementById('btn-autolevels').onclick = autoLevels;
+
+// ============================================================
+// === BUCKET FILL (FLOOD FILL) ===
+// ============================================================
+// Click anywhere; flood-fills 4-connected pixels of the same value with the
+// current draw target. Works on map (wall/erase/unscan) or mask (keepout).
+//
+// To "see" vector shapes (so a Wall shape acts as a barrier even though it
+// isn't in the raster yet), we rasterize all shapes into a temporary copy of
+// the appropriate buffer before the flood, then diff with the original and
+// apply only the new pixels back to the real buffer. This means vector shapes
+// remain editable.
+function bucketFillAt(mp) {
+  if (!state.map || !state.meta) return;
+  const target = state.currentTarget;
+  const info = TARGET_INFO[target];
+  if (!info) return;
+
+  const buf = getTargetBuf(target);
+  if (!buf) return;
+
+  const w = buf.width, h = buf.height;
+  const sx = Math.floor(mp.x), sy = Math.floor(mp.y);
+  if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
+
+  // Build a "what the user sees" buffer = current raster + rasterized shapes
+  // that target the same layer.
+  const layerKey = info.layer; // 'map' or 'mask'
+  const tempBuf = { width: w, height: h, maxval: 255,
+    data: new Uint8Array(buf.data) };
+  state.shapes.forEach(s => {
+    const sInfo = TARGET_INFO[s.target];
+    if (!sInfo) return;
+    if (sInfo.layer !== layerKey) return;
+    // rasterize shape onto temp copy of correct layer
+    if (layerKey === 'map') rasterizeShape(s, tempBuf, null);
+    else rasterizeShape(s, null, tempBuf);
+  });
+
+  const seedValue = tempBuf.data[sy * w + sx];
+  const newValue = info.value;
+
+  // If clicking on a pixel that's already the target color, nothing to do.
+  if (seedValue === newValue) {
+    // Quick visual feedback in status; no-op.
+    return;
+  }
+
+  // Flood fill 4-connected on tempBuf
+  // We mark pixels we've changed in tempBuf (so we know what to apply to the real buf).
+  // Using a Uint8Array of visited flags would double memory; instead, we just
+  // compare tempBuf vs original buf at the end on the changed region.
+  const stack = new Int32Array(w * h);
+  let sp = 0;
+  stack[sp++] = sy * w + sx;
+  let minX = sx, minY = sy, maxX = sx, maxY = sy;
+  while (sp > 0) {
+    const idx = stack[--sp];
+    if (tempBuf.data[idx] !== seedValue) continue;
+    // Find extent of scanline of seed color around idx
+    const y = (idx / w) | 0;
+    let xL = idx - y * w;
+    let xR = xL;
+    const rowOff = y * w;
+    while (xL > 0 && tempBuf.data[rowOff + xL - 1] === seedValue) xL--;
+    while (xR < w - 1 && tempBuf.data[rowOff + xR + 1] === seedValue) xR++;
+    for (let x = xL; x <= xR; x++) {
+      tempBuf.data[rowOff + x] = newValue;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y > 0 && tempBuf.data[rowOff - w + x] === seedValue) {
+        stack[sp++] = rowOff - w + x;
+      }
+      if (y < h - 1 && tempBuf.data[rowOff + w + x] === seedValue) {
+        stack[sp++] = rowOff + w + x;
+      }
+    }
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+
+  // Now copy back the changes to the real buffer, but ONLY for pixels that
+  // were originally NOT covered by a shape. Shapes will rasterize themselves
+  // at export time; we don't want to bake them prematurely.
+  // We build the shape-coverage mask in one pass per layer: temporarily set
+  // each shape's target value to 1 onto a clean buffer, then restore.
+  const coverBuf = { width: w, height: h, maxval: 255, data: new Uint8Array(w * h) };
+  state.shapes.forEach(s => {
+    const sInfo = TARGET_INFO[s.target];
+    if (!sInfo || sInfo.layer !== layerKey) return;
+    const origVal = TARGET_INFO[s.target].value;
+    TARGET_INFO[s.target].value = 1;
+    if (layerKey === 'map') rasterizeShape(s, coverBuf, null);
+    else rasterizeShape(s, null, coverBuf);
+    TARGET_INFO[s.target].value = origVal;
+  });
+
+  // Apply the diff
+  saveHistory('Bucket fill ' + target);
+  for (let y = minY; y <= maxY; y++) {
+    const rowOff = y * w;
+    for (let x = minX; x <= maxX; x++) {
+      const i = rowOff + x;
+      if (tempBuf.data[i] !== buf.data[i] && coverBuf.data[i] === 0) {
+        buf.data[i] = tempBuf.data[i];
+      }
+    }
+  }
+  applyRasterPatch(target, { x0: minX, y0: minY, x1: maxX + 1, y1: maxY + 1 });
+  redraw();
+}
+
+
+// ============================================================
+// === VECTOR SHAPES ===
+// ============================================================
+// Shape kinds:
+//   line     : { kind, p1: {x,y}, p2: {x,y} }
+//   polyline : { kind, points: [{x,y}, ...] }
+//   rect     : { kind, x, y, w, h }  (axis-aligned)
+//   rrect    : { kind, cx, cy, w, h, theta }  (rotated, center-anchored)
+//   polygon  : { kind, points: [...] }  (closed)
+//   circle   : { kind, cx, cy, r }
+//   ellipse  : { kind, cx, cy, rx, ry, theta }
+//   arc      : { kind, cx, cy, r, a0, a1 }   angles in radians, CCW
+//   bezier   : { kind, p1, c1, c2, p2 }
+//   freepath : { kind, points: [...] }       (open path)
+//
+// All coordinates are in MAP PX (so they are independent of zoom/pan).
+// Common fields on every shape: id, name, target, style, width.
+
+const SHAPE_KIND_LABEL = {
+  line: 'Line', polyline: 'Polyline', rect: 'Rect', rrect: 'RRect',
+  polygon: 'Polygon', circle: 'Circle', ellipse: 'Ellipse',
+  arc: 'Arc', bezier: 'Bezier', freepath: 'Free path',
+};
+
+function newShapeBase(kind) {
+  return {
+    id: state.nextShapeId++,
+    kind,
+    name: SHAPE_KIND_LABEL[kind] + ' ' + state.nextShapeId,
+    target: state.currentTarget,
+    style: state.shapeStyle,
+    width: state.brushWidth,
+  };
+}
+
+function addShape(s) {
+  state.shapes.set(s.id, s);
+  updateShapeListUi();
+  return s;
+}
+function removeShape(id) {
+  state.shapes.delete(id);
+  state.selection.delete(id);
+  updateShapeListUi();
+  renderPropsPanel();
+}
+function deleteSelectedShapes() {
+  if (!state.selection.size) return;
+  saveHistory('Delete shapes');
+  [...state.selection].forEach(id => state.shapes.delete(id));
+  state.selection.clear();
+  updateShapeListUi();
+  renderPropsPanel();
+  updateSelectionStatus();
+  redraw();
+}
+function duplicateSelectedShapes() {
+  if (!state.selection.size) return;
+  saveHistory('Duplicate shapes');
+  const newIds = new Set();
+  const offset = 8;  // in map px
+  state.selection.forEach(id => {
+    const orig = state.shapes.get(id);
+    if (!orig) return;
+    const copy = deepCopyShape(orig);
+    copy.id = state.nextShapeId++;
+    copy.name = orig.name + ' copy';
+    translateShape(copy, offset, offset);
+    state.shapes.set(copy.id, copy);
+    newIds.add(copy.id);
+  });
+  state.selection = newIds;
+  updateShapeListUi();
+  renderPropsPanel();
+  updateSelectionStatus();
+  redraw();
+}
+function deepCopyShape(s) {
+  return JSON.parse(JSON.stringify(s));
+}
+
+function translateShape(s, dx, dy) {
+  switch (s.kind) {
+    case 'line':
+      s.p1.x += dx; s.p1.y += dy; s.p2.x += dx; s.p2.y += dy; break;
+    case 'rect':
+      s.x += dx; s.y += dy; break;
+    case 'rrect':
+    case 'ellipse':
+    case 'circle':
+    case 'arc':
+      s.cx += dx; s.cy += dy; break;
+    case 'polyline':
+    case 'polygon':
+    case 'freepath':
+      s.points.forEach(p => { p.x += dx; p.y += dy; }); break;
+    case 'bezier':
+      s.p1.x += dx; s.p1.y += dy; s.p2.x += dx; s.p2.y += dy;
+      s.c1.x += dx; s.c1.y += dy; s.c2.x += dx; s.c2.y += dy; break;
+  }
+}
+
+// Bounding box of a shape in map px (axis-aligned).
+function shapeBBox(s) {
+  let pts = [];
+  switch (s.kind) {
+    case 'line':     pts = [s.p1, s.p2]; break;
+    case 'polyline':
+    case 'polygon':
+    case 'freepath': pts = s.points; break;
+    case 'rect':     pts = [{x:s.x,y:s.y},{x:s.x+s.w,y:s.y+s.h}]; break;
+    case 'rrect': {
+      const c = Math.cos(s.theta), si = Math.sin(s.theta);
+      const hx = s.w/2, hy = s.h/2;
+      const corners = [[-hx,-hy],[hx,-hy],[hx,hy],[-hx,hy]];
+      pts = corners.map(([px,py]) => ({ x: s.cx + px*c - py*si, y: s.cy + px*si + py*c }));
+      break;
+    }
+    case 'circle':   pts = [{x:s.cx-s.r,y:s.cy-s.r},{x:s.cx+s.r,y:s.cy+s.r}]; break;
+    case 'ellipse': {
+      const rr = Math.max(s.rx, s.ry);
+      pts = [{x:s.cx-rr,y:s.cy-rr},{x:s.cx+rr,y:s.cy+rr}]; break;
+    }
+    case 'arc':      pts = [{x:s.cx-s.r,y:s.cy-s.r},{x:s.cx+s.r,y:s.cy+s.r}]; break;
+    case 'bezier':   pts = [s.p1, s.c1, s.c2, s.p2]; break;
+  }
+  let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+  pts.forEach(p => {
+    if (p.x < mnx) mnx = p.x; if (p.y < mny) mny = p.y;
+    if (p.x > mxx) mxx = p.x; if (p.y > mxy) mxy = p.y;
+  });
+  return { x0: mnx, y0: mny, x1: mxx, y1: mxy };
+}
+
+// Hit-test: is map-px point p inside or near shape s?
+function hitShape(s, p, tolMapPx) {
+  const tol = tolMapPx;
+  switch (s.kind) {
+    case 'line':
+      return pointToSegmentDist(p, s.p1, s.p2) <= tol;
+    case 'polyline':
+    case 'freepath':
+      for (let i = 0; i < s.points.length - 1; i++) {
+        if (pointToSegmentDist(p, s.points[i], s.points[i+1]) <= tol) return true;
+      }
+      return false;
+    case 'polygon': {
+      if (s.style === 'fill' && pointInPolygon(p, s.points)) return true;
+      for (let i = 0; i < s.points.length; i++) {
+        const a = s.points[i], b = s.points[(i+1) % s.points.length];
+        if (pointToSegmentDist(p, a, b) <= tol) return true;
+      }
+      return false;
+    }
+    case 'rect': {
+      if (s.style === 'fill' &&
+          p.x >= s.x && p.x <= s.x + s.w && p.y >= s.y && p.y <= s.y + s.h) return true;
+      // outline
+      const corners = [{x:s.x,y:s.y},{x:s.x+s.w,y:s.y},{x:s.x+s.w,y:s.y+s.h},{x:s.x,y:s.y+s.h}];
+      for (let i = 0; i < 4; i++) {
+        if (pointToSegmentDist(p, corners[i], corners[(i+1)%4]) <= tol) return true;
+      }
+      return false;
+    }
+    case 'rrect': {
+      const c = Math.cos(-s.theta), si = Math.sin(-s.theta);
+      const lx = (p.x - s.cx) * c - (p.y - s.cy) * si;
+      const ly = (p.x - s.cx) * si + (p.y - s.cy) * c;
+      if (s.style === 'fill' &&
+          Math.abs(lx) <= s.w/2 && Math.abs(ly) <= s.h/2) return true;
+      const onEdge = (Math.abs(Math.abs(lx) - s.w/2) <= tol && Math.abs(ly) <= s.h/2 + tol) ||
+                     (Math.abs(Math.abs(ly) - s.h/2) <= tol && Math.abs(lx) <= s.w/2 + tol);
+      return onEdge;
+    }
+    case 'circle': {
+      const d = Math.hypot(p.x - s.cx, p.y - s.cy);
+      if (s.style === 'fill' && d <= s.r) return true;
+      return Math.abs(d - s.r) <= tol;
+    }
+    case 'ellipse': {
+      const c = Math.cos(-s.theta||0), si = Math.sin(-s.theta||0);
+      const lx = (p.x - s.cx) * c - (p.y - s.cy) * si;
+      const ly = (p.x - s.cx) * si + (p.y - s.cy) * c;
+      const k = (lx*lx)/(s.rx*s.rx) + (ly*ly)/(s.ry*s.ry);
+      if (s.style === 'fill' && k <= 1) return true;
+      return Math.abs(k - 1) <= 0.15;  // rough
+    }
+    case 'arc': {
+      const d = Math.hypot(p.x - s.cx, p.y - s.cy);
+      if (Math.abs(d - s.r) > tol) return false;
+      let a = Math.atan2(p.y - s.cy, p.x - s.cx);
+      const norm = x => { while (x < 0) x += Math.PI*2; while (x >= Math.PI*2) x -= Math.PI*2; return x; };
+      let a0 = norm(s.a0), a1 = norm(s.a1), aa = norm(a);
+      if (a0 < a1) return aa >= a0 && aa <= a1;
+      return aa >= a0 || aa <= a1;
+    }
+    case 'bezier': {
+      // sample 20 points
+      for (let i = 0; i < 20; i++) {
+        const t1 = i/20, t2 = (i+1)/20;
+        const q1 = bezierAt(s, t1), q2 = bezierAt(s, t2);
+        if (pointToSegmentDist(p, q1, q2) <= tol) return true;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
+function bezierAt(s, t) {
+  const u = 1 - t;
+  const x = u*u*u*s.p1.x + 3*u*u*t*s.c1.x + 3*u*t*t*s.c2.x + t*t*t*s.p2.x;
+  const y = u*u*u*s.p1.y + 3*u*u*t*s.c1.y + 3*u*t*t*s.c2.y + t*t*t*s.p2.y;
+  return { x, y };
+}
+function pointToSegmentDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx*dx + dy*dy;
+  if (len2 < 1e-9) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  const qx = a.x + t * dx, qy = a.y + t * dy;
+  return Math.hypot(p.x - qx, p.y - qy);
+}
+function pointInPolygon(p, pts) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    const intersect = ((yi > p.y) !== (yj > p.y)) &&
+                      (p.x < (xj - xi) * (p.y - yi) / (yj - yi + 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+// Compute handles (in map px) for a shape: { name -> {x,y} }
+function shapeHandles(s) {
+  const h = {};
+  switch (s.kind) {
+    case 'line': h.p1 = {...s.p1}; h.p2 = {...s.p2}; break;
+    case 'rect': {
+      const c = [{x:s.x,y:s.y},{x:s.x+s.w,y:s.y},{x:s.x+s.w,y:s.y+s.h},{x:s.x,y:s.y+s.h}];
+      h.nw = c[0]; h.ne = c[1]; h.se = c[2]; h.sw = c[3];
+      break;
+    }
+    case 'rrect': {
+      const c = Math.cos(s.theta), si = Math.sin(s.theta);
+      const corners = [[-s.w/2,-s.h/2],[s.w/2,-s.h/2],[s.w/2,s.h/2],[-s.w/2,s.h/2]];
+      const names = ['nw','ne','se','sw'];
+      corners.forEach(([px,py], i) => {
+        h[names[i]] = { x: s.cx + px*c - py*si, y: s.cy + px*si + py*c };
+      });
+      h.rot = { x: s.cx + 0 * c - (-s.h/2 - 20)*si, y: s.cy + 0 * si + (-s.h/2 - 20)*c };
+      break;
+    }
+    case 'circle': h.center = {x: s.cx, y: s.cy}; h.r = {x: s.cx + s.r, y: s.cy}; break;
+    case 'ellipse':
+      h.center = {x: s.cx, y: s.cy};
+      h.rx = {x: s.cx + s.rx, y: s.cy};
+      h.ry = {x: s.cx, y: s.cy + s.ry};
+      break;
+    case 'arc':
+      h.center = {x: s.cx, y: s.cy};
+      h.start = {x: s.cx + s.r*Math.cos(s.a0), y: s.cy + s.r*Math.sin(s.a0)};
+      h.end   = {x: s.cx + s.r*Math.cos(s.a1), y: s.cy + s.r*Math.sin(s.a1)};
+      break;
+    case 'polyline':
+    case 'polygon':
+    case 'freepath':
+      s.points.forEach((p, i) => { h['p'+i] = {...p}; });
+      break;
+    case 'bezier':
+      h.p1 = {...s.p1}; h.p2 = {...s.p2};
+      h.c1 = {...s.c1}; h.c2 = {...s.c2};
+      break;
+  }
+  return h;
+}
+
+function applyHandleDelta(s, handleName, newMapPx, shiftDown) {
+  switch (s.kind) {
+    case 'line':
+    case 'bezier':
+      s[handleName].x = newMapPx.x;
+      s[handleName].y = newMapPx.y;
+      break;
+    case 'rect': {
+      // Resize from corner
+      const opposite = { nw:'se', ne:'sw', se:'nw', sw:'ne' }[handleName];
+      const corners = { nw:{x:s.x,y:s.y}, ne:{x:s.x+s.w,y:s.y},
+                        se:{x:s.x+s.w,y:s.y+s.h}, sw:{x:s.x,y:s.y+s.h} };
+      const op = corners[opposite];
+      const nx0 = Math.min(op.x, newMapPx.x);
+      const ny0 = Math.min(op.y, newMapPx.y);
+      const nx1 = Math.max(op.x, newMapPx.x);
+      const ny1 = Math.max(op.y, newMapPx.y);
+      s.x = nx0; s.y = ny0; s.w = nx1 - nx0; s.h = ny1 - ny0;
+      break;
+    }
+    case 'rrect': {
+      if (handleName === 'rot') {
+        const dx = newMapPx.x - s.cx, dy = newMapPx.y - s.cy;
+        // angle of point relative to center; rotation handle was at (0,-h/2-20),
+        // so the implicit "up" direction is -y_local.
+        let theta = Math.atan2(dy, dx) + Math.PI/2;
+        if (shiftDown) theta = Math.round(theta / (Math.PI/12)) * (Math.PI/12);
+        s.theta = theta;
+      } else {
+        // Resize from corner in local space.
+        const c = Math.cos(-s.theta), si = Math.sin(-s.theta);
+        const lx = (newMapPx.x - s.cx) * c - (newMapPx.y - s.cy) * si;
+        const ly = (newMapPx.x - s.cx) * si + (newMapPx.y - s.cy) * c;
+        const corners = { nw:[-1,-1], ne:[1,-1], se:[1,1], sw:[-1,1] };
+        const sgn = corners[handleName];
+        const newHalfW = Math.max(1, Math.abs(lx));
+        const newHalfH = Math.max(1, Math.abs(ly));
+        // Center stays the same; resize symmetrically? Or anchor opposite corner?
+        // Anchor opposite corner (more intuitive).
+        const opp = { nw:'se', ne:'sw', se:'nw', sw:'ne' }[handleName];
+        const oppSgn = corners[opp];
+        const cR = Math.cos(s.theta), siR = Math.sin(s.theta);
+        const oppLocal = { x: oppSgn[0]*s.w/2, y: oppSgn[1]*s.h/2 };
+        const oppWorld = { x: s.cx + oppLocal.x*cR - oppLocal.y*siR,
+                           y: s.cy + oppLocal.x*siR + oppLocal.y*cR };
+        const newCenterLocal = { x: (sgn[0] + oppSgn[0])*0 /*unused*/, y: 0 };
+        s.w = Math.max(2, 2 * newHalfW);
+        s.h = Math.max(2, 2 * newHalfH);
+        const newLocalCenter = { x: -oppSgn[0]*s.w/2, y: -oppSgn[1]*s.h/2 };
+        s.cx = oppWorld.x + newLocalCenter.x * cR - newLocalCenter.y * siR;
+        s.cy = oppWorld.y + newLocalCenter.x * siR + newLocalCenter.y * cR;
+      }
+      break;
+    }
+    case 'circle': {
+      if (handleName === 'center') { s.cx = newMapPx.x; s.cy = newMapPx.y; }
+      else if (handleName === 'r') s.r = Math.max(1, Math.hypot(newMapPx.x - s.cx, newMapPx.y - s.cy));
+      break;
+    }
+    case 'ellipse': {
+      if (handleName === 'center') { s.cx = newMapPx.x; s.cy = newMapPx.y; }
+      else if (handleName === 'rx') s.rx = Math.max(1, Math.abs(newMapPx.x - s.cx));
+      else if (handleName === 'ry') s.ry = Math.max(1, Math.abs(newMapPx.y - s.cy));
+      break;
+    }
+    case 'arc': {
+      if (handleName === 'center') { s.cx = newMapPx.x; s.cy = newMapPx.y; }
+      else if (handleName === 'start') {
+        const a = Math.atan2(newMapPx.y - s.cy, newMapPx.x - s.cx);
+        s.a0 = a;
+        const newR = Math.hypot(newMapPx.x - s.cx, newMapPx.y - s.cy);
+        s.r = Math.max(1, newR);
+      } else if (handleName === 'end') {
+        s.a1 = Math.atan2(newMapPx.y - s.cy, newMapPx.x - s.cx);
+      }
+      break;
+    }
+    case 'polyline':
+    case 'polygon':
+    case 'freepath': {
+      const idx = parseInt(handleName.slice(1), 10);
+      if (!isNaN(idx) && s.points[idx]) {
+        s.points[idx].x = newMapPx.x; s.points[idx].y = newMapPx.y;
+      }
+      break;
+    }
+  }
+}
+
+
+// ============================================================
+// === VECTOR RASTERIZATION (for export and flatten) ===
+// ============================================================
+
+function rasterizeShape(s, mapBuf, maskBuf) {
+  const info = TARGET_INFO[s.target] || TARGET_INFO.wall;
+  const buf = (info.layer === 'mask') ? maskBuf : mapBuf;
+  if (!buf) return;
+  const r = Math.max(0.5, s.width / 2);
+  const filled = s.style === 'fill';
+  const val = info.value;
+  switch (s.kind) {
+    case 'line':
+      rasterLine(buf, s.p1.x, s.p1.y, s.p2.x, s.p2.y, r, val);
+      break;
+    case 'polyline':
+    case 'freepath':
+      for (let i = 0; i < s.points.length - 1; i++) {
+        const a = s.points[i], b = s.points[i+1];
+        rasterLine(buf, a.x, a.y, b.x, b.y, r, val);
+      }
+      break;
+    case 'rect':
+      rasterRect(buf, s.x, s.y, s.x + s.w, s.y + s.h, r, val, filled);
+      break;
+    case 'rrect': {
+      const c = Math.cos(s.theta), si = Math.sin(s.theta);
+      const corners = [[-s.w/2,-s.h/2],[s.w/2,-s.h/2],[s.w/2,s.h/2],[-s.w/2,s.h/2]]
+        .map(([px,py]) => ({ x: s.cx + px*c - py*si, y: s.cy + px*si + py*c }));
+      if (filled) rasterPolygonFill(buf, corners, val);
+      for (let i = 0; i < 4; i++) {
+        rasterLine(buf, corners[i].x, corners[i].y, corners[(i+1)%4].x, corners[(i+1)%4].y, r, val);
+      }
+      break;
+    }
+    case 'polygon': {
+      if (filled) rasterPolygonFill(buf, s.points, val);
+      for (let i = 0; i < s.points.length; i++) {
+        const a = s.points[i], b = s.points[(i+1) % s.points.length];
+        rasterLine(buf, a.x, a.y, b.x, b.y, r, val);
+      }
+      break;
+    }
+    case 'circle': {
+      if (filled) rasterDisc(buf, s.cx, s.cy, s.r, val);
+      else {
+        const steps = Math.max(16, Math.ceil(s.r * 2));
+        for (let i = 0; i < steps; i++) {
+          const a0 = (i / steps) * Math.PI * 2, a1 = ((i+1) / steps) * Math.PI * 2;
+          rasterLine(buf, s.cx + Math.cos(a0)*s.r, s.cy + Math.sin(a0)*s.r,
+                          s.cx + Math.cos(a1)*s.r, s.cy + Math.sin(a1)*s.r, r, val);
+        }
+      }
+      break;
+    }
+    case 'ellipse': {
+      const th = s.theta || 0;
+      const c = Math.cos(th), si = Math.sin(th);
+      const steps = Math.max(20, Math.ceil(Math.max(s.rx, s.ry) * 2));
+      const pts = [];
+      for (let i = 0; i <= steps; i++) {
+        const a = (i / steps) * Math.PI * 2;
+        const lx = Math.cos(a) * s.rx, ly = Math.sin(a) * s.ry;
+        pts.push({ x: s.cx + lx * c - ly * si, y: s.cy + lx * si + ly * c });
+      }
+      if (filled) rasterPolygonFill(buf, pts.slice(0, -1), val);
+      for (let i = 0; i < pts.length - 1; i++) {
+        rasterLine(buf, pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y, r, val);
+      }
+      break;
+    }
+    case 'arc': {
+      const steps = 32;
+      let a0 = s.a0, a1 = s.a1;
+      if (a1 < a0) a1 += Math.PI*2;
+      for (let i = 0; i < steps; i++) {
+        const t1 = i/steps, t2 = (i+1)/steps;
+        const an1 = a0 + (a1-a0)*t1, an2 = a0 + (a1-a0)*t2;
+        rasterLine(buf,
+          s.cx + Math.cos(an1)*s.r, s.cy + Math.sin(an1)*s.r,
+          s.cx + Math.cos(an2)*s.r, s.cy + Math.sin(an2)*s.r,
+          r, val);
+      }
+      break;
+    }
+    case 'bezier': {
+      const steps = 40;
+      for (let i = 0; i < steps; i++) {
+        const q1 = bezierAt(s, i/steps), q2 = bezierAt(s, (i+1)/steps);
+        rasterLine(buf, q1.x, q1.y, q2.x, q2.y, r, val);
+      }
+      break;
+    }
+  }
+}
+
+// Scanline polygon fill (general, for arbitrary polygons in map px space).
+function rasterPolygonFill(buf, pts, value) {
+  if (!pts || pts.length < 3) return;
+  const w = buf.width, h = buf.height;
+  let mny = Infinity, mxy = -Infinity;
+  pts.forEach(p => { if (p.y < mny) mny = p.y; if (p.y > mxy) mxy = p.y; });
+  const y0 = Math.max(0, Math.floor(mny));
+  const y1 = Math.min(h - 1, Math.ceil(mxy));
+  for (let y = y0; y <= y1; y++) {
+    const ys = y + 0.5;
+    const xs = [];
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const yi = pts[i].y, yj = pts[j].y;
+      if ((yi > ys) !== (yj > ys)) {
+        const x = (pts[j].x - pts[i].x) * (ys - yi) / (yj - yi + 1e-12) + pts[i].x;
+        xs.push(x);
+      }
+    }
+    xs.sort((a,b) => a-b);
+    for (let k = 0; k < xs.length; k += 2) {
+      const xa = Math.max(0, Math.ceil(xs[k]));
+      const xb = Math.min(w - 1, Math.floor(xs[k+1]));
+      const row = y * w;
+      for (let x = xa; x <= xb; x++) buf.data[row + x] = value;
+    }
+  }
+}
+
+// "Flatten" all selected shapes into the raster, then remove them from the
+// vector layer. If selection is empty, flatten all visible shapes.
+function flattenSelectedShapes() {
+  const ids = state.selection.size ? [...state.selection] : [...state.shapes.keys()];
+  if (!ids.length) return;
+  saveHistory('Flatten shapes');
+  ids.forEach(id => {
+    const s = state.shapes.get(id);
+    if (s) rasterizeShape(s, state.map, getTargetBuf('keepout') /* lazy-create mask */);
+  });
+  rebuildMapImageData();
+  rebuildMaskImageData();
+  ids.forEach(id => { state.shapes.delete(id); state.selection.delete(id); });
+  updateShapeListUi();
+  renderPropsPanel();
+  updateSelectionStatus();
+  state.mapDirty = true;
+  state.maskDirty = true;
+  redraw();
+}
+
+
+// ============================================================
+// === MOUSE: PAN ===
+// ============================================================
+
+canvasArea.addEventListener('mousedown', e => {
+  if (!state.map) return;
+  const c = mouseToCanvas(e);
+  const mp = canvasToMapPx(c.x, c.y);
+  const isPanTrigger = (state.tool === 'pan') || state.spaceDown || e.button === 1;
+  if (isPanTrigger) {
+    state.isPanning = true;
+    state.panStart = { mx: c.x, my: c.y, panX: state.pan.x, panY: state.pan.y };
+    canvasArea.style.cursor = 'grabbing';
+    e.preventDefault();
+    return;
+  }
+  // Delegate by tool
+  if (state.tool === 'draw') {
+    handleShapeMouseDown(c, mp, e);
+  } else if (state.tool === 'measure') {
+    handleMeasureMouseDown(c, mp);
+  } else if (state.tool === 'origin') {
+    handleOriginMouseDown(c, mp);
+  } else if (state.tool === 'bucket') {
+    bucketFillAt(mp);
+  } else if (state.tool === 'select') {
+    handleSelectMouseDown(c, mp, e);
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  const c = mouseToCanvas(e);
+  const rect = canvasArea.getBoundingClientRect();
+  const mp = canvasToMapPx(c.x, c.y);
+
+  if (state.isPanning && state.panStart) {
+    state.pan.x = state.panStart.panX + (c.x - state.panStart.mx);
+    state.pan.y = state.panStart.panY + (c.y - state.panStart.my);
+    redraw();
+  }
+
+  // status
+  if (state.map && c.x >= 0 && c.y >= 0 && c.x <= rect.width && c.y <= rect.height) {
+    const w = mapPxToWorld(mp.x, mp.y);
+    elStatusPx.textContent = `${Math.floor(mp.x)}, ${Math.floor(mp.y)}`;
+    elStatusWorld.textContent = `${w.x.toFixed(2)}, ${w.y.toFixed(2)} m`;
+  }
+
+  // Delegate by tool
+  if (state.tool === 'draw') {
+    handleShapeMouseMove(c, mp);
+  } else if (state.tool === 'measure') {
+    handleMeasureMouseMove(c, mp);
+  } else if (state.tool === 'origin') {
+    handleOriginMouseMove(c, mp);
+  } else if (state.tool === 'select') {
+    handleSelectMouseMove(c, mp);
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  const c = mouseToCanvas(e);
+  const mp = canvasToMapPx(c.x, c.y);
+  if (state.isPanning) {
+    state.isPanning = false;
+    canvasArea.style.cursor = cursorForTool();
+    return;
+  }
+  if (state.tool === 'draw') handleShapeMouseUp(c, mp);
+  else if (state.tool === 'measure') handleMeasureMouseUp(c, mp);
+  else if (state.tool === 'origin') handleOriginMouseUp(c, mp);
+  else if (state.tool === 'select') handleSelectMouseUp(c, mp);
+});
+
+function cursorForTool() {
+  if (state.spaceDown) return 'grab';
+  if (state.tool === 'pan') return 'grab';
+  if (state.tool === 'draw') return 'crosshair';
+  if (state.tool === 'measure') return 'crosshair';
+  if (state.tool === 'origin') return 'crosshair';
+  if (state.tool === 'bucket') return 'crosshair';
+  if (state.tool === 'select') return 'default';
+  return 'default';
+}
+
+// ============================================================
+// === KEYBOARD ===
+// ============================================================
+
+window.addEventListener('keydown', e => {
+  const tag = (e.target && e.target.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  if (e.code === 'Space' && !state.spaceDown) {
+    state.spaceDown = true;
+    canvasArea.style.cursor = 'grab';
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'Shift') state.shiftDown = true;
+  if (e.key === 'Control' || e.key === 'Meta') state.ctrlDown = true;
+
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); undo(); return; }
+    if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); redo(); return; }
+    if (e.key === 'd' || e.key === 'D') { e.preventDefault(); duplicateSelectedShapes(); return; }
+    if (e.key === 's' || e.key === 'S') { e.preventDefault(); saveProject(); return; }
+    if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault();
+      state.selection = new Set([...state.shapes.keys()]);
+      updateShapeListUi(); updateSelectionStatus(); renderPropsPanel(); redraw();
+      return;
+    }
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    state.shapeDraw = null;
+    state.measure = null;
+    measureHud.style.display = 'none';
+    state.selection.clear();
+    updateShapeListUi(); updateSelectionStatus(); renderPropsPanel();
+    redraw();
+    return;
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (state.selection.size) { e.preventDefault(); deleteSelectedShapes(); }
+    return;
+  }
+  if (e.key === 'h' || e.key === 'H') setTool('pan');
+  if (e.key === 'v' || e.key === 'V') setTool('select');
+  if (e.key === 'w' || e.key === 'W') { setDrawTarget('wall'); setTool('draw'); }
+  if (e.key === 'e' || e.key === 'E') { setDrawTarget('erase'); setTool('draw'); }
+  if (e.key === 'u' || e.key === 'U') { setDrawTarget('unscan'); setTool('draw'); }
+  if (e.key === 'k' || e.key === 'K') { setDrawTarget('keepout'); setTool('draw'); }
+  if (e.key === 'm' || e.key === 'M') setTool('measure');
+  if (e.key === 'o' || e.key === 'O') setTool('origin');
+  if (e.key === 'g' || e.key === 'G') setTool('bucket');
+  if (e.key === 'b' || e.key === 'B') { setDrawKind('freepath'); if (state.tool !== 'draw') setTool('draw'); }
+  if (e.key === 'l' || e.key === 'L') { setDrawKind('line');     if (state.tool !== 'draw') setTool('draw'); }
+  if (e.key === 'r' || e.key === 'R') { setDrawKind('rect');     if (state.tool !== 'draw') setTool('draw'); }
+  if (e.key === 'f' || e.key === 'F') autoFit();
+  if (e.key === '[') { state.brushWidth = Math.max(1, state.brushWidth - 1); updateDrawPanelUi(); }
+  if (e.key === ']') { state.brushWidth = Math.min(64, state.brushWidth + 1); updateDrawPanelUi(); }
+});
+
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space') { state.spaceDown = false; canvasArea.style.cursor = cursorForTool(); }
+  if (e.key === 'Shift') state.shiftDown = false;
+  if (e.key === 'Control' || e.key === 'Meta') state.ctrlDown = false;
+});
+
+
+// ============================================================
+// === MEASURE TOOL ===
+// ============================================================
+
+function handleMeasureMouseDown(c, mp) {
+  state.measure = { aMap: mp, bMap: mp };
+  redraw();
+}
+function handleMeasureMouseMove(c, mp) {
+  if (!state.measure) {
+    measureHud.style.display = 'none';
+    return;
+  }
+  state.measure.bMap = mp;
+  const a = state.measure.aMap, b = state.measure.bMap;
+  const dxPx = b.x - a.x, dyPx = b.y - a.y;
+  const distPx = Math.hypot(dxPx, dyPx);
+  const res = (state.meta && state.meta.resolution) || 1;
+  const distM = distPx * res;
+  const distFt = distM * 3.28084;
+  measureHud.style.left = (c.x + 14) + 'px';
+  measureHud.style.top  = (c.y + 14) + 'px';
+  measureHud.style.display = 'block';
+  measureHud.textContent = `${distM.toFixed(3)} m  ·  ${distFt.toFixed(2)} ft  ·  ${distPx.toFixed(1)} px`;
+  redraw();
+}
+function handleMeasureMouseUp(c, mp) {
+  // Keep the measurement visible; press Esc or change tool to clear.
+}
+
+// ============================================================
+// === ORIGIN TOOL ===
+// ============================================================
+// Conceptual model: the user is placing world (0, 0) on the map.
+// Setting world (0,0) at map pixel (mpx, mpy) means:
+//   origin_x = -mpx * res
+//   origin_y = -(height - mpy) * res
+// (because worldToMapPx of (0,0) gives ((-origin_x)/res, height - (-origin_y)/res),
+//  and we want that to equal (mpx, mpy).)
+function setOriginFromMapPx(mpx, mpy) {
+  if (!state.meta || !state.map) return;
+  const res = state.meta.resolution;
+  const h = state.map.height;
+  state.meta.origin[0] = +(-mpx * res).toFixed(6);
+  state.meta.origin[1] = +(-(h - mpy) * res).toFixed(6);
+}
+
+function handleOriginMouseDown(c, mp) {
+  if (!state.meta || !state.map) return;
+  // Position of world (0,0) on the map, in canvas px
+  const op = worldToMapPx(0, 0);
+  const oc = mapPxToCanvas(op.x, op.y);
+  const distCanvas = Math.hypot(c.x - oc.x, c.y - oc.y);
+  if (distCanvas <= 18) {
+    // Drag the existing marker
+    state.originDrag = {
+      startCanvasX: c.x, startCanvasY: c.y,
+      origOriginX: state.meta.origin[0],
+      origOriginY: state.meta.origin[1],
+      didMove: false,
+    };
+    saveHistory('Drag origin');
+  } else {
+    // Click somewhere else: set world (0,0) at this map pixel
+    saveHistory('Set origin');
+    setOriginFromMapPx(mp.x, mp.y);
+    updateMetaUi();
+    renderPropsPanel();
+    redraw();
+  }
+}
+function handleOriginMouseMove(c, mp) {
+  if (!state.originDrag || !state.meta) return;
+  const res = state.meta.resolution;
+  // Mouse delta in canvas px → translate origin in world m
+  // origin_x grows when (0,0) moves LEFT on screen (because origin_x is the
+  // world coordinate of the PGM corner; if we move (0,0) right, the corner
+  // appears to shift left relative to (0,0), so origin_x decreases).
+  const dx = (c.x - state.originDrag.startCanvasX) / state.zoom * res;
+  const dy = (c.y - state.originDrag.startCanvasY) / state.zoom * res;
+  state.meta.origin[0] = +(state.originDrag.origOriginX - dx).toFixed(6);
+  state.meta.origin[1] = +(state.originDrag.origOriginY + dy).toFixed(6);
+  state.originDrag.didMove = true;
+  updateMetaUi();
+  renderPropsPanel();
+  redraw();
+}
+function handleOriginMouseUp(c, mp) {
+  state.originDrag = null;
+}
+
+
+// ============================================================
+// === SHAPE TOOL (CREATION) ===
+// ============================================================
+
+function setDrawKind(kind) {
+  state.currentKind = kind;
+  state.shapeDraw = null;  // cancel any in-progress polyline
+  updateDrawPanelUi();
+  redraw();
+}
+
+function setDrawTarget(target) {
+  state.currentTarget = target;
+  // default fill style: keepout filled, others outline
+  // (user can still toggle per shape from properties)
+  updateDrawPanelUi();
+  redraw();
+}
+
+function updateDrawPanelUi() {
+  // Topbar target buttons
+  document.querySelectorAll('.target-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.target === state.currentTarget && state.tool === 'draw');
+  });
+  // Kind toolbar in right panel
+  document.querySelectorAll('#kind-toolbar button').forEach(b => {
+    b.classList.toggle('active', b.dataset.shapeKind === state.currentKind);
+  });
+  // Target name in panel header
+  const tn = document.getElementById('draw-target-name');
+  if (tn) tn.textContent = ' · ' + (TARGET_INFO[state.currentTarget]?.label || state.currentTarget);
+  // Width slider + label
+  const ws = document.getElementById('shape-width-slider');
+  const wv = document.getElementById('shape-width-val');
+  if (ws) ws.value = state.brushWidth;
+  if (wv) wv.textContent = state.brushWidth + ' px';
+  // Style select
+  const ss = document.getElementById('shape-style');
+  if (ss) ss.value = state.shapeStyle;
+}
+
+// Wire kind buttons in right panel
+document.querySelectorAll('#kind-toolbar button[data-shape-kind]').forEach(b => {
+  b.addEventListener('click', () => setDrawKind(b.dataset.shapeKind));
+});
+// Wire width slider
+document.getElementById('shape-width-slider').addEventListener('input', e => {
+  state.brushWidth = parseInt(e.target.value, 10) || 1;
+  document.getElementById('shape-width-val').textContent = state.brushWidth + ' px';
+});
+// Wire style select
+document.getElementById('shape-style').addEventListener('change', e => {
+  state.shapeStyle = e.target.value;
+});
+// Wire target buttons (topbar)
+document.querySelectorAll('.target-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    setDrawTarget(b.dataset.target);
+    setTool('draw');
+  });
+});
+
+function handleShapeMouseDown(c, mp, e) {
+  const kind = state.currentKind;
+  if (!kind) return;
+  const sp = snapMapPx(mp);
+  // For two-point shapes (line, rect, rrect, circle, ellipse, arc, bezier), start dragging.
+  // For multi-point shapes (polyline, polygon, freepath), accumulate points.
+  if (['polyline','polygon','freepath'].includes(kind)) {
+    if (kind === 'freepath') {
+      saveHistory('Create freepath');
+      const s = newShapeBase('freepath');
+      s.points = [sp];
+      addShape(s);
+      state.shapeDraw = { kind: 'freepath', shape: s };
+      state.selection = new Set([s.id]);
+      updateShapeListUi();
+      return;
+    }
+    if (!state.shapeDraw || state.shapeDraw.kind !== kind) {
+      // start new polyline/polygon
+      saveHistory('Create ' + kind);
+      const s = newShapeBase(kind);
+      s.points = [sp];
+      addShape(s);
+      state.shapeDraw = { kind, shape: s, accumulating: true };
+      state.selection = new Set([s.id]);
+      updateShapeListUi();
+    } else {
+      // add another point
+      const s = state.shapeDraw.shape;
+      // polygon closes when clicking near first point
+      if (kind === 'polygon' && s.points.length >= 3) {
+        const first = s.points[0];
+        const dCanvas = Math.hypot((sp.x - first.x) * state.zoom, (sp.y - first.y) * state.zoom);
+        if (dCanvas <= 10) {
+          state.shapeDraw = null;
+          renderPropsPanel();
+          redraw();
+          return;
+        }
+      }
+      s.points.push(sp);
+    }
+    renderPropsPanel();
+    redraw();
+    return;
+  }
+
+  // Two-point shapes: drag-create
+  saveHistory('Create ' + kind);
+  let s;
+  switch (kind) {
+    case 'line':
+      s = newShapeBase('line');
+      s.p1 = { ...sp }; s.p2 = { ...sp };
+      break;
+    case 'rect':
+      s = newShapeBase('rect');
+      s.x = sp.x; s.y = sp.y; s.w = 0; s.h = 0;
+      break;
+    case 'rrect':
+      s = newShapeBase('rrect');
+      s.cx = sp.x; s.cy = sp.y; s.w = 0; s.h = 0; s.theta = 0;
+      break;
+    case 'circle':
+      s = newShapeBase('circle');
+      s.cx = sp.x; s.cy = sp.y; s.r = 0;
+      break;
+    case 'ellipse':
+      s = newShapeBase('ellipse');
+      s.cx = sp.x; s.cy = sp.y; s.rx = 0; s.ry = 0; s.theta = 0;
+      break;
+    case 'arc':
+      s = newShapeBase('arc');
+      s.cx = sp.x; s.cy = sp.y; s.r = 0; s.a0 = 0; s.a1 = Math.PI;
+      break;
+    case 'bezier':
+      s = newShapeBase('bezier');
+      s.p1 = { ...sp }; s.p2 = { ...sp };
+      s.c1 = { ...sp }; s.c2 = { ...sp };
+      break;
+  }
+  if (s) {
+    addShape(s);
+    state.shapeDraw = { kind, shape: s, startMapPx: sp, dragging: true };
+    state.selection = new Set([s.id]);
+    updateShapeListUi();
+  }
+}
+
+function handleShapeMouseMove(c, mp) {
+  if (!state.shapeDraw) return;
+  const d = state.shapeDraw;
+  const s = d.shape;
+  let p = snapMapPx(mp);
+  if (d.kind === 'freepath') {
+    s.points.push(p);
+    redraw();
+    return;
+  }
+  if (d.accumulating) {
+    // polyline / polygon: live-preview a candidate next segment using mouse position.
+    // We keep s.points stable; preview is drawn separately by referencing `mp`.
+    state._previewMp = p;
+    redraw();
+    return;
+  }
+  if (!d.dragging) return;
+  // Apply Shift constraint for two-point shapes
+  if (state.shiftDown) {
+    const cn = constrainShift(p.x - d.startMapPx.x, p.y - d.startMapPx.y);
+    p = { x: d.startMapPx.x + cn.dx, y: d.startMapPx.y + cn.dy };
+  }
+  const a = d.startMapPx;
+  switch (s.kind) {
+    case 'line': s.p2 = { ...p }; break;
+    case 'rect':
+      s.x = Math.min(a.x, p.x); s.y = Math.min(a.y, p.y);
+      s.w = Math.abs(p.x - a.x); s.h = Math.abs(p.y - a.y);
+      break;
+    case 'rrect':
+      s.w = Math.abs(p.x - a.x); s.h = Math.abs(p.y - a.y);
+      s.cx = (a.x + p.x) / 2; s.cy = (a.y + p.y) / 2;
+      break;
+    case 'circle':
+      s.r = Math.hypot(p.x - a.x, p.y - a.y);
+      break;
+    case 'ellipse':
+      s.rx = Math.abs(p.x - a.x); s.ry = Math.abs(p.y - a.y);
+      break;
+    case 'arc':
+      s.r = Math.hypot(p.x - a.x, p.y - a.y);
+      s.a0 = 0; s.a1 = Math.PI;
+      break;
+    case 'bezier':
+      s.p2 = { ...p };
+      // Auto-place control points along the line at 1/3, 2/3
+      s.c1 = { x: a.x + (p.x - a.x) / 3, y: a.y + (p.y - a.y) / 3 - 30 };
+      s.c2 = { x: a.x + 2 * (p.x - a.x) / 3, y: a.y + 2 * (p.y - a.y) / 3 - 30 };
+      break;
+  }
+  renderPropsPanel();
+  redraw();
+}
+
+function handleShapeMouseUp(c, mp) {
+  if (!state.shapeDraw) return;
+  const d = state.shapeDraw;
+  if (d.kind === 'freepath') {
+    state.shapeDraw = null;
+    redraw();
+    return;
+  }
+  if (d.dragging) {
+    state.shapeDraw = null;
+    redraw();
+  }
+  // polyline/polygon: stay in accumulating mode until Esc or polygon close
+}
+
+// Right-click anywhere on canvas = cancel current operation (like Esc)
+canvasArea.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  // Cancel in-progress shape
+  if (state.shapeDraw) { state.shapeDraw = null; redraw(); return; }
+  // Cancel measure
+  if (state.measure) { state.measure = null; measureHud.style.display = 'none'; redraw(); return; }
+  // Cancel raster preview (legacy, shouldn't be active in vector mode)
+  if (state.rasterDraw) { state.rasterDraw = null; redraw(); return; }
+  // Clear selection
+  if (state.selection.size) {
+    state.selection.clear();
+    updateShapeListUi(); updateSelectionStatus(); renderPropsPanel();
+    redraw();
+    return;
+  }
+});
+
+// ============================================================
+// === SELECT TOOL ===
+// ============================================================
+
+function handleSelectMouseDown(c, mp, e) {
+  // Check if we're clicking on a handle of an already-selected shape
+  if (state.selection.size === 1) {
+    const id = [...state.selection][0];
+    const s = state.shapes.get(id);
+    if (s) {
+      const handles = shapeHandles(s);
+      for (const name in handles) {
+        const h = handles[name];
+        const dCanvas = Math.hypot((mp.x - h.x) * state.zoom, (mp.y - h.y) * state.zoom);
+        if (dCanvas <= 8) {
+          saveHistory('Edit shape');
+          state.shapeHandleDrag = { shapeId: id, handle: name };
+          return;
+        }
+      }
+    }
+  }
+
+  // Hit-test against shapes (topmost first; iteration order is insertion order)
+  const ids = [...state.shapes.keys()].reverse();
+  const tol = 6 / state.zoom;
+  let hit = null;
+  for (const id of ids) {
+    const s = state.shapes.get(id);
+    if (hitShape(s, mp, tol)) { hit = id; break; }
+  }
+
+  if (hit) {
+    if (e.shiftKey) {
+      if (state.selection.has(hit)) state.selection.delete(hit);
+      else state.selection.add(hit);
+    } else {
+      if (!state.selection.has(hit)) state.selection = new Set([hit]);
+    }
+    saveHistory('Move shapes');
+    state.shapeDragMove = {
+      startMapPx: mp,
+      origPositions: new Map([...state.selection].map(id =>
+        [id, deepCopyShape(state.shapes.get(id))])),
+    };
+    updateShapeListUi();
+    updateSelectionStatus();
+    renderPropsPanel();
+    redraw();
+  } else {
+    // Start box-select
+    if (!e.shiftKey) state.selection.clear();
+    state.boxSelect = { startMapPx: mp, currentMapPx: mp };
+    updateShapeListUi();
+    updateSelectionStatus();
+    renderPropsPanel();
+    redraw();
+  }
+}
+
+function handleSelectMouseMove(c, mp) {
+  if (state.shapeHandleDrag) {
+    const id = state.shapeHandleDrag.shapeId;
+    const s = state.shapes.get(id);
+    if (s) {
+      applyHandleDelta(s, state.shapeHandleDrag.handle, snapMapPx(mp), state.shiftDown);
+      renderPropsPanel();
+      redraw();
+    }
+    return;
+  }
+  if (state.shapeDragMove) {
+    const dx = mp.x - state.shapeDragMove.startMapPx.x;
+    const dy = mp.y - state.shapeDragMove.startMapPx.y;
+    let ddx = dx, ddy = dy;
+    if (state.shiftDown) {
+      const cn = constrainShift(dx, dy);
+      ddx = cn.dx; ddy = cn.dy;
+    }
+    state.shapeDragMove.origPositions.forEach((orig, id) => {
+      const s = state.shapes.get(id);
+      if (!s) return;
+      // start from original
+      const restored = deepCopyShape(orig);
+      Object.keys(s).forEach(k => delete s[k]);
+      Object.assign(s, restored);
+      translateShape(s, ddx, ddy);
+    });
+    redraw();
+    return;
+  }
+  if (state.boxSelect) {
+    state.boxSelect.currentMapPx = mp;
+    redraw();
+    return;
+  }
+
+  // Hover detection
+  const tol = 6 / state.zoom;
+  let hover = null;
+  for (const id of [...state.shapes.keys()].reverse()) {
+    const s = state.shapes.get(id);
+    if (hitShape(s, mp, tol)) { hover = id; break; }
+  }
+  if (hover !== state.hoverShape) {
+    state.hoverShape = hover;
+    redraw();
+  }
+}
+
+function handleSelectMouseUp(c, mp) {
+  if (state.shapeHandleDrag) { state.shapeHandleDrag = null; return; }
+  if (state.shapeDragMove)   { state.shapeDragMove = null; return; }
+  if (state.boxSelect) {
+    const a = state.boxSelect.startMapPx, b = state.boxSelect.currentMapPx;
+    const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+    const y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+    state.shapes.forEach((s, id) => {
+      const bb = shapeBBox(s);
+      if (bb.x0 >= x0 && bb.x1 <= x1 && bb.y0 >= y0 && bb.y1 <= y1) {
+        state.selection.add(id);
+      }
+    });
+    state.boxSelect = null;
+    updateShapeListUi();
+    updateSelectionStatus();
+    renderPropsPanel();
+    redraw();
+  }
+}
+
+
+// ============================================================
+// === TOOLS WIRING ===
+// ============================================================
+
+function setTool(tool) {
+  state.tool = tool;
+  elStatusTool.textContent = (tool === 'draw') ? ('draw · ' + state.currentTarget)
+    : (tool === 'bucket') ? ('bucket · ' + state.currentTarget)
+    : tool;
+  // Topbar tool button highlights
+  document.getElementById('tool-pan').classList.toggle('active', tool === 'pan');
+  document.getElementById('tool-select').classList.toggle('active', tool === 'select');
+  document.getElementById('tool-measure').classList.toggle('active', tool === 'measure');
+  document.getElementById('tool-origin').classList.toggle('active', tool === 'origin');
+  document.getElementById('tool-bucket').classList.toggle('active', tool === 'bucket');
+  // Target button highlights only when in draw/bucket tool
+  document.querySelectorAll('.target-btn').forEach(b => {
+    b.classList.toggle('active', (tool === 'draw' || tool === 'bucket') && b.dataset.target === state.currentTarget);
+  });
+  // Right panel sections
+  document.getElementById('draw-tool-section').style.display = (tool === 'draw') ? '' : 'none';
+  state.measure = null;
+  measureHud.style.display = 'none';
+  state.shapeDraw = null;
+  canvasArea.style.cursor = cursorForTool();
+  updateDrawPanelUi();
+  renderPropsPanel();
+  redraw();
+}
+
+document.getElementById('tool-pan').onclick     = () => setTool('pan');
+document.getElementById('tool-select').onclick  = () => setTool('select');
+document.getElementById('tool-measure').onclick = () => setTool('measure');
+document.getElementById('tool-origin').onclick  = () => setTool('origin');
+document.getElementById('tool-bucket').onclick  = () => setTool('bucket');
+document.getElementById('btn-flatten').onclick  = () => flattenSelectedShapes();
+
+// Options
+document.getElementById('opt-snap').addEventListener('change', e => {
+  state.snap = e.target.checked;
+  document.getElementById('snap-row').style.display = state.snap ? '' : 'none';
+});
+document.getElementById('snap-step').addEventListener('change', e => {
+  state.snapStep = Math.max(0.001, parseFloat(e.target.value) || 0.1);
+});
+document.getElementById('opt-grid').addEventListener('change', e => {
+  state.showGrid = e.target.checked;
+  redraw();
+});
+document.getElementById('opt-show-origin').addEventListener('change', e => {
+  state.showOrigin = e.target.checked;
+  redraw();
+});
+
+// Theme toggle
+function applyTheme(theme) {
+  state.theme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('theme-icon-dark').style.display  = (theme === 'dark') ? 'block' : 'none';
+  document.getElementById('theme-icon-light').style.display = (theme === 'light') ? 'block' : 'none';
+  try { localStorage.setItem('sas-map-theme', theme); } catch (e) {}
+}
+document.getElementById('btn-theme').onclick = () => {
+  applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+};
+// Init theme from storage or default dark
+try {
+  const saved = localStorage.getItem('sas-map-theme');
+  applyTheme(saved === 'light' ? 'light' : 'dark');
+} catch (e) { applyTheme('dark'); }
+
+setTool('pan');
+
+
+// ============================================================
+// === LAYERS UI ===
+// ============================================================
+
+function updateLayersUi() {
+  const empty = document.getElementById('layers-empty');
+  const list = document.getElementById('layers-list');
+  if (!state.map) {
+    empty.style.display = 'block'; list.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  list.style.display = 'block';
+  list.innerHTML = '';
+  Object.entries(state.layers).forEach(([key, layer]) => {
+    const item = document.createElement('div');
+    item.className = 'layer-item';
+    item.innerHTML = `
+      <button class="icon-btn" data-action="visible" title="Toggle visible">
+        ${layer.visible ?
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>' :
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m2 2 20 20"/><path d="M6.71 6.71C3.4 8.27 2 12 2 12s3 7 10 7c1.59 0 2.84-.3 3.79-.73"/><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/></svg>'
+        }
+      </button>
+      <span class="layer-name">${escapeHtml(layer.name)}</span>
+      <input type="range" min="0" max="100" value="${Math.round(layer.opacity * 100)}" data-action="opacity">
+    `;
+    item.querySelector('[data-action="visible"]').onclick = () => {
+      layer.visible = !layer.visible;
+      updateLayersUi(); redraw();
+    };
+    item.querySelector('[data-action="opacity"]').oninput = e => {
+      layer.opacity = parseInt(e.target.value, 10) / 100;
+      redraw();
+    };
+    list.appendChild(item);
+  });
+}
+
+function updateShapeListUi() {
+  const sec = document.getElementById('shapes-section');
+  const list = document.getElementById('shape-list');
+  if (!state.shapes.size) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  list.innerHTML = '';
+  state.shapes.forEach((s, id) => {
+    const item = document.createElement('div');
+    item.className = 'shape-item' + (state.selection.has(id) ? ' selected' : '');
+    item.innerHTML = `<span class="shape-kind">${SHAPE_KIND_LABEL[s.kind]}</span><span>${escapeHtml(s.name)}</span>`;
+    item.onclick = e => {
+      if (e.shiftKey) {
+        if (state.selection.has(id)) state.selection.delete(id);
+        else state.selection.add(id);
+      } else {
+        state.selection = new Set([id]);
+      }
+      updateShapeListUi(); updateSelectionStatus(); renderPropsPanel(); redraw();
+    };
+    list.appendChild(item);
+  });
+}
+
+function updateSelectionStatus() {
+  if (state.selection.size === 0) elStatusSel.textContent = 'none';
+  else if (state.selection.size === 1) {
+    const s = state.shapes.get([...state.selection][0]);
+    elStatusSel.textContent = s ? `${s.name} (${s.kind})` : 'none';
+  } else elStatusSel.textContent = state.selection.size + ' shapes';
+}
+
+
+// ============================================================
+// === PROPERTIES PANEL ===
+// ============================================================
+
+function el(tag, attrs = {}, children = []) {
+  const e = document.createElement(tag);
+  Object.entries(attrs).forEach(([k, v]) => {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e[k] = v;
+    else e.setAttribute(k, v);
+  });
+  children.forEach(c => e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c));
+  return e;
+}
+
+function propRow(label, input) {
+  const row = el('div', { class: 'prop-row' });
+  const lab = el('label', {}, [label]);
+  row.appendChild(lab);
+  row.appendChild(input);
+  return row;
+}
+function numInput(val, onChange, opts={}) {
+  const i = el('input', { type: 'number', step: opts.step || 'any', value: val });
+  i.addEventListener('change', () => onChange(parseFloat(i.value) || 0));
+  return i;
+}
+function textInput(val, onChange) {
+  const i = el('input', { type: 'text', value: val });
+  i.addEventListener('input', () => onChange(i.value));
+  return i;
+}
+function selectInput(opts, val, onChange) {
+  const s = el('select');
+  opts.forEach(o => {
+    const opt = el('option', { value: o.value || o }, [o.label || o]);
+    if ((o.value || o) === val) opt.setAttribute('selected', 'selected');
+    s.appendChild(opt);
+  });
+  s.addEventListener('change', () => onChange(s.value));
+  return s;
+}
+
+function renderPropsPanel() {
+  const empty = document.getElementById('props-empty');
+  const content = document.getElementById('props-content');
+  empty.style.display = 'none';
+  content.style.display = 'block';
+  content.innerHTML = '';
+
+  if (state.selection.size === 0) {
+    if (state.tool === 'origin') {
+      renderOriginProps(content);
+    } else {
+      empty.style.display = 'block';
+      content.style.display = 'none';
+    }
+    return;
+  }
+  if (state.selection.size > 1) {
+    content.appendChild(el('div', { style: 'font-size: 12px; color: var(--text-muted); margin-bottom: 10px;' },
+      [state.selection.size + ' shapes selected']));
+    const flat = el('button', { class: 'full-btn',
+      onclick: () => flattenSelectedShapes() }, ['Flatten to raster']);
+    const del = el('button', { class: 'danger full-btn',
+      onclick: () => deleteSelectedShapes() }, ['Delete selection']);
+    const dup = el('button', { class: 'full-btn',
+      onclick: () => duplicateSelectedShapes() }, ['Duplicate']);
+    content.appendChild(dup); content.appendChild(flat); content.appendChild(del);
+    return;
+  }
+
+  const id = [...state.selection][0];
+  const s = state.shapes.get(id);
+  if (!s) return;
+
+  const title = el('div', { style: 'font-family: var(--serif); font-style: italic; font-size: 16px; margin-bottom: 8px;' },
+    [s.name]);
+  content.appendChild(title);
+
+  content.appendChild(propRow('Name', textInput(s.name, v => {
+    s.name = v; updateShapeListUi(); updateSelectionStatus();
+  })));
+  content.appendChild(propRow('Kind', el('div', { style: 'font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--text-muted);' },
+    [SHAPE_KIND_LABEL[s.kind]])));
+  content.appendChild(propRow('Target', selectInput(
+    [{value:'wall',label:'Wall'},{value:'erase',label:'Erase'},{value:'unscan',label:'Un-scan'},{value:'keepout',label:'Keep-out'}],
+    s.target, v => { s.target = v; redraw(); }
+  )));
+  content.appendChild(propRow('Style', selectInput(
+    [{value:'stroke',label:'Outline'},{value:'fill',label:'Filled'}], s.style,
+    v => { s.style = v; redraw(); }
+  )));
+  content.appendChild(propRow('Width', numInput(s.width,
+    v => { s.width = Math.max(1, v); redraw(); }, { step: 1 })));
+
+  // Shape-specific geometry
+  const geom = el('div', { style: 'margin-top: 12px;' });
+  geom.appendChild(el('h4', {}, ['Geometry (map px)']));
+  switch (s.kind) {
+    case 'line':
+      geom.appendChild(propRow('p1 x', numInput(s.p1.x, v => { s.p1.x = v; redraw(); })));
+      geom.appendChild(propRow('p1 y', numInput(s.p1.y, v => { s.p1.y = v; redraw(); })));
+      geom.appendChild(propRow('p2 x', numInput(s.p2.x, v => { s.p2.x = v; redraw(); })));
+      geom.appendChild(propRow('p2 y', numInput(s.p2.y, v => { s.p2.y = v; redraw(); })));
+      break;
+    case 'rect':
+      geom.appendChild(propRow('x', numInput(s.x, v => { s.x = v; redraw(); })));
+      geom.appendChild(propRow('y', numInput(s.y, v => { s.y = v; redraw(); })));
+      geom.appendChild(propRow('w', numInput(s.w, v => { s.w = v; redraw(); })));
+      geom.appendChild(propRow('h', numInput(s.h, v => { s.h = v; redraw(); })));
+      break;
+    case 'rrect':
+      geom.appendChild(propRow('cx', numInput(s.cx, v => { s.cx = v; redraw(); })));
+      geom.appendChild(propRow('cy', numInput(s.cy, v => { s.cy = v; redraw(); })));
+      geom.appendChild(propRow('w', numInput(s.w, v => { s.w = v; redraw(); })));
+      geom.appendChild(propRow('h', numInput(s.h, v => { s.h = v; redraw(); })));
+      geom.appendChild(propRow('θ (rad)', numInput(s.theta, v => { s.theta = v; redraw(); }, { step: 0.05 })));
+      break;
+    case 'circle':
+      geom.appendChild(propRow('cx', numInput(s.cx, v => { s.cx = v; redraw(); })));
+      geom.appendChild(propRow('cy', numInput(s.cy, v => { s.cy = v; redraw(); })));
+      geom.appendChild(propRow('r', numInput(s.r, v => { s.r = v; redraw(); })));
+      break;
+    case 'ellipse':
+      geom.appendChild(propRow('cx', numInput(s.cx, v => { s.cx = v; redraw(); })));
+      geom.appendChild(propRow('cy', numInput(s.cy, v => { s.cy = v; redraw(); })));
+      geom.appendChild(propRow('rx', numInput(s.rx, v => { s.rx = v; redraw(); })));
+      geom.appendChild(propRow('ry', numInput(s.ry, v => { s.ry = v; redraw(); })));
+      geom.appendChild(propRow('θ (rad)', numInput(s.theta || 0, v => { s.theta = v; redraw(); }, { step: 0.05 })));
+      break;
+    case 'arc':
+      geom.appendChild(propRow('cx', numInput(s.cx, v => { s.cx = v; redraw(); })));
+      geom.appendChild(propRow('cy', numInput(s.cy, v => { s.cy = v; redraw(); })));
+      geom.appendChild(propRow('r', numInput(s.r, v => { s.r = v; redraw(); })));
+      geom.appendChild(propRow('a0 (rad)', numInput(s.a0, v => { s.a0 = v; redraw(); }, { step: 0.05 })));
+      geom.appendChild(propRow('a1 (rad)', numInput(s.a1, v => { s.a1 = v; redraw(); }, { step: 0.05 })));
+      break;
+    case 'polyline':
+    case 'polygon':
+    case 'freepath':
+      geom.appendChild(el('div', { style: 'font-size: 11px; color: var(--text-muted);' },
+        [s.points.length + ' points · drag handles to edit']));
+      break;
+    case 'bezier':
+      geom.appendChild(propRow('p1 x', numInput(s.p1.x, v => { s.p1.x = v; redraw(); })));
+      geom.appendChild(propRow('p1 y', numInput(s.p1.y, v => { s.p1.y = v; redraw(); })));
+      geom.appendChild(propRow('p2 x', numInput(s.p2.x, v => { s.p2.x = v; redraw(); })));
+      geom.appendChild(propRow('p2 y', numInput(s.p2.y, v => { s.p2.y = v; redraw(); })));
+      break;
+  }
+  content.appendChild(geom);
+
+  content.appendChild(el('button', { class: 'full-btn', onclick: () => flattenSelectedShapes() },
+    ['Flatten to raster']));
+  content.appendChild(el('button', { class: 'full-btn', onclick: () => duplicateSelectedShapes() },
+    ['Duplicate']));
+  content.appendChild(el('button', { class: 'danger full-btn', onclick: () => deleteSelectedShapes() },
+    ['Delete shape']));
+}
+
+function renderOriginProps(content) {
+  if (!state.meta || !state.map) return;
+  content.appendChild(el('div', { style: 'font-family: var(--serif); font-style: italic; font-size: 16px; margin-bottom: 8px;' },
+    ['Map origin']));
+  content.appendChild(el('div', { style: 'font-size: 12px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;' },
+    ['The marker shows where world (0, 0) lands on the map. Click on the canvas to put it there, or drag the marker. The YAML fields below are the raw Nav2 values: world coordinates of the PGM\u2019s bottom-left corner.']));
+
+  // Current world (0,0) position in map px (computed)
+  const op = worldToMapPx(0, 0);
+  const inside = op.x >= 0 && op.x < state.map.width && op.y >= 0 && op.y < state.map.height;
+  const statusEl = el('div', { style: 'font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: ' + (inside ? 'var(--text)' : '#B85436') + '; margin-bottom: 12px;' },
+    [`world (0,0) at map px: ${op.x.toFixed(1)}, ${op.y.toFixed(1)}` + (inside ? '' : '  · off-map')]);
+  content.appendChild(statusEl);
+
+  content.appendChild(el('h4', {}, ['Set world (0,0) at map pixel']));
+  const mpxIn = el('input', { type: 'number', value: op.x.toFixed(2), step: '1' });
+  const mpyIn = el('input', { type: 'number', value: op.y.toFixed(2), step: '1' });
+  const applyMpx = () => {
+    saveHistory('Set origin');
+    setOriginFromMapPx(parseFloat(mpxIn.value) || 0, parseFloat(mpyIn.value) || 0);
+    updateMetaUi(); renderPropsPanel(); redraw();
+  };
+  mpxIn.addEventListener('change', applyMpx);
+  mpyIn.addEventListener('change', applyMpx);
+  content.appendChild(propRow('map px x', mpxIn));
+  content.appendChild(propRow('map px y', mpyIn));
+
+  content.appendChild(el('h4', {}, ['YAML origin (Nav2 raw)']));
+  content.appendChild(propRow('origin_x (m)', numInput(state.meta.origin[0], v => {
+    saveHistory('Set origin'); state.meta.origin[0] = v; updateMetaUi(); renderPropsPanel(); redraw();
+  })));
+  content.appendChild(propRow('origin_y (m)', numInput(state.meta.origin[1], v => {
+    saveHistory('Set origin'); state.meta.origin[1] = v; updateMetaUi(); renderPropsPanel(); redraw();
+  })));
+  content.appendChild(propRow('θ (rad)', numInput(state.meta.origin[2], v => {
+    saveHistory('Set origin'); state.meta.origin[2] = v; updateMetaUi(); renderPropsPanel(); redraw();
+  }, { step: 0.05 })));
+
+  const resetBtn = el('button', { class: 'full-btn', onclick: () => {
+    saveHistory('Reset origin'); state.meta.origin = [0, 0, 0]; updateMetaUi(); renderPropsPanel(); redraw();
+  }}, ['Reset to (0, 0, 0)']);
+  content.appendChild(resetBtn);
+
+  const centerBtn = el('button', { class: 'full-btn', onclick: () => {
+    saveHistory('Center origin');
+    setOriginFromMapPx(state.map.width / 2, state.map.height / 2);
+    updateMetaUi(); renderPropsPanel(); redraw();
+  }}, ['Center world (0,0) on map']);
+  content.appendChild(centerBtn);
+}
+
+
+// ============================================================
+// === RENDER ===
+// ============================================================
+
+function redraw() {
+  const rect = canvasArea.getBoundingClientRect();
+  ctxMap.clearRect(0, 0, rect.width, rect.height);
+  ctxMask.clearRect(0, 0, rect.width, rect.height);
+  ctxOver.clearRect(0, 0, rect.width, rect.height);
+
+  if (!state.map) return;
+
+  // Lazy-build image data
+  if (!_mapOffscreen) rebuildMapImageData();
+  if (!_maskOffscreen && state.mask) rebuildMaskImageData();
+
+  ctxMap.imageSmoothingEnabled = false;
+  ctxMask.imageSmoothingEnabled = false;
+
+  const w = state.map.width  * state.zoom;
+  const h = state.map.height * state.zoom;
+
+  if (state.layers.map.visible && _mapOffscreen) {
+    ctxMap.globalAlpha = state.layers.map.opacity;
+    ctxMap.drawImage(_mapOffscreen, state.pan.x, state.pan.y, w, h);
+    ctxMap.globalAlpha = 1;
+  }
+  if (state.layers.mask.visible && _maskOffscreen) {
+    ctxMask.globalAlpha = state.layers.mask.opacity;
+    ctxMask.drawImage(_maskOffscreen, state.pan.x, state.pan.y, w, h);
+    ctxMask.globalAlpha = 1;
+  }
+
+  // Vector overlay
+  drawOverlay(rect);
+
+  elStatusZoom.textContent = Math.round(state.zoom * 100) + '%';
+}
+
+function drawOverlay(rect) {
+  ctxOver.save();
+
+  // Grid (in meters)
+  if (state.showGrid && state.meta) {
+    const stepM = state.snapStep > 0 ? state.snapStep : 0.5;
+    const stepCanvas = (stepM / state.meta.resolution) * state.zoom;
+    if (stepCanvas >= 8) {
+      ctxOver.strokeStyle = 'rgba(20,20,19,0.06)';
+      ctxOver.lineWidth = 1;
+      const x0 = state.pan.x % stepCanvas;
+      const y0 = state.pan.y % stepCanvas;
+      for (let x = x0; x < rect.width; x += stepCanvas) {
+        ctxOver.beginPath(); ctxOver.moveTo(x, 0); ctxOver.lineTo(x, rect.height); ctxOver.stroke();
+      }
+      for (let y = y0; y < rect.height; y += stepCanvas) {
+        ctxOver.beginPath(); ctxOver.moveTo(0, y); ctxOver.lineTo(rect.width, y); ctxOver.stroke();
+      }
+    }
+  }
+
+  // Vector shapes
+  if (state.layers.vector.visible) {
+    ctxOver.globalAlpha = state.layers.vector.opacity;
+    state.shapes.forEach((s, id) => {
+      const isSel = state.selection.has(id);
+      const isHover = state.hoverShape === id;
+      drawShapeOverlay(s, isSel, isHover);
+    });
+    ctxOver.globalAlpha = 1;
+  }
+
+  // Shape being drawn: live preview for polyline/polygon next segment
+  if (state.shapeDraw) {
+    const d = state.shapeDraw;
+    if (d.accumulating && d.shape && state._previewMp) {
+      const pts = d.shape.points;
+      const last = pts[pts.length - 1];
+      const a = mapPxToCanvas(last.x, last.y);
+      const b = mapPxToCanvas(state._previewMp.x, state._previewMp.y);
+      const targetCol = TARGET_INFO[d.shape.target]?.color || '#141413';
+      ctxOver.strokeStyle = targetCol;
+      ctxOver.globalAlpha = 0.55;
+      ctxOver.lineWidth = Math.max(1, d.shape.width * state.zoom);
+      ctxOver.lineCap = 'round';
+      ctxOver.setLineDash([6, 4]);
+      ctxOver.beginPath();
+      ctxOver.moveTo(a.x, a.y); ctxOver.lineTo(b.x, b.y);
+      ctxOver.stroke();
+      ctxOver.setLineDash([]);
+      ctxOver.globalAlpha = 1;
+      ctxOver.lineCap = 'butt';
+    }
+  }
+
+  // Raster preview removed: in vector-first mode, the shape itself is the live preview.
+
+  // Measure overlay
+  if (state.measure) {
+    const a = mapPxToCanvas(state.measure.aMap.x, state.measure.aMap.y);
+    const b = mapPxToCanvas(state.measure.bMap.x, state.measure.bMap.y);
+    ctxOver.strokeStyle = 'var(--measure)';
+    ctxOver.strokeStyle = '#4A6D8C';
+    ctxOver.lineWidth = 2;
+    ctxOver.setLineDash([6, 4]);
+    ctxOver.beginPath(); ctxOver.moveTo(a.x, a.y); ctxOver.lineTo(b.x, b.y); ctxOver.stroke();
+    ctxOver.setLineDash([]);
+    drawHandle(a.x, a.y, '#4A6D8C');
+    drawHandle(b.x, b.y, '#4A6D8C');
+  }
+
+  // Box-select rectangle
+  if (state.boxSelect) {
+    const a = mapPxToCanvas(state.boxSelect.startMapPx.x, state.boxSelect.startMapPx.y);
+    const b = mapPxToCanvas(state.boxSelect.currentMapPx.x, state.boxSelect.currentMapPx.y);
+    ctxOver.strokeStyle = '#C96442';
+    ctxOver.fillStyle = 'rgba(201,100,66,0.10)';
+    ctxOver.lineWidth = 1;
+    ctxOver.setLineDash([4, 3]);
+    const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y), w = Math.abs(b.x-a.x), h = Math.abs(b.y-a.y);
+    ctxOver.fillRect(x, y, w, h);
+    ctxOver.strokeRect(x, y, w, h);
+    ctxOver.setLineDash([]);
+  }
+
+  // Origin marker
+  if (state.showOrigin && state.meta) {
+    drawOriginMarker();
+  }
+
+  ctxOver.restore();
+}
+
+function drawShapeOverlay(s, isSel, isHover) {
+  // Render shape exactly as it will appear after flatten:
+  // target color, real width (in canvas pixels = width * zoom)
+  const targetCol = TARGET_INFO[s.target]?.color || '#141413';
+  const fillCol = (() => {
+    if (s.target === 'keepout') return 'rgba(201, 100, 66, 0.55)';
+    if (s.target === 'wall')    return 'rgba(20, 20, 19, 1)';
+    if (s.target === 'erase')   return 'rgba(255, 255, 255, 1)';
+    if (s.target === 'unscan')  return 'rgba(179, 176, 166, 1)';
+    return targetCol;
+  })();
+
+  ctxOver.lineCap = 'round';
+  ctxOver.lineJoin = 'round';
+  ctxOver.strokeStyle = (s.target === 'erase') ? '#FFFFFF' : targetCol;
+  ctxOver.lineWidth = Math.max(1, s.width * state.zoom);
+  ctxOver.fillStyle = fillCol;
+  shapePath(s);
+  if (s.style === 'fill') ctxOver.fill();
+  ctxOver.stroke();
+
+  // Selection / hover highlight on top (independent of target color)
+  if (isSel || isHover) {
+    ctxOver.lineWidth = Math.max(1.5, s.width * state.zoom + 2);
+    ctxOver.strokeStyle = isSel ? 'rgba(201, 100, 66, 0.95)' : 'rgba(74, 109, 140, 0.55)';
+    ctxOver.setLineDash(isSel ? [] : [4, 3]);
+    // Stroke a thin outline ring around the shape silhouette
+    ctxOver.save();
+    ctxOver.globalCompositeOperation = 'source-over';
+    ctxOver.lineWidth = 1.5;
+    shapePath(s);
+    ctxOver.stroke();
+    ctxOver.restore();
+    ctxOver.setLineDash([]);
+  }
+  ctxOver.lineCap = 'butt';
+  ctxOver.lineJoin = 'miter';
+
+  if (isSel) {
+    const handles = shapeHandles(s);
+    for (const name in handles) {
+      const h = handles[name];
+      const cc = mapPxToCanvas(h.x, h.y);
+      drawHandle(cc.x, cc.y, '#C96442');
+      if (name === 'rot') {
+        const cen = mapPxToCanvas(s.cx, s.cy);
+        ctxOver.strokeStyle = 'rgba(201,100,66,0.5)';
+        ctxOver.setLineDash([3, 3]);
+        ctxOver.lineWidth = 1;
+        ctxOver.beginPath(); ctxOver.moveTo(cen.x, cen.y); ctxOver.lineTo(cc.x, cc.y); ctxOver.stroke();
+        ctxOver.setLineDash([]);
+      }
+    }
+  }
+}
+
+function shapePath(s) {
+  ctxOver.beginPath();
+  switch (s.kind) {
+    case 'line': {
+      const a = mapPxToCanvas(s.p1.x, s.p1.y), b = mapPxToCanvas(s.p2.x, s.p2.y);
+      ctxOver.moveTo(a.x, a.y); ctxOver.lineTo(b.x, b.y); break;
+    }
+    case 'polyline':
+    case 'freepath':
+      if (s.points.length > 0) {
+        const a = mapPxToCanvas(s.points[0].x, s.points[0].y);
+        ctxOver.moveTo(a.x, a.y);
+        for (let i = 1; i < s.points.length; i++) {
+          const p = mapPxToCanvas(s.points[i].x, s.points[i].y);
+          ctxOver.lineTo(p.x, p.y);
+        }
+      }
+      break;
+    case 'polygon':
+      if (s.points.length > 0) {
+        const a = mapPxToCanvas(s.points[0].x, s.points[0].y);
+        ctxOver.moveTo(a.x, a.y);
+        for (let i = 1; i < s.points.length; i++) {
+          const p = mapPxToCanvas(s.points[i].x, s.points[i].y);
+          ctxOver.lineTo(p.x, p.y);
+        }
+        ctxOver.closePath();
+      }
+      break;
+    case 'rect': {
+      const a = mapPxToCanvas(s.x, s.y);
+      ctxOver.rect(a.x, a.y, s.w * state.zoom, s.h * state.zoom);
+      break;
+    }
+    case 'rrect': {
+      const cc = mapPxToCanvas(s.cx, s.cy);
+      ctxOver.save();
+      ctxOver.translate(cc.x, cc.y);
+      ctxOver.rotate(s.theta);
+      ctxOver.rect(-s.w/2 * state.zoom, -s.h/2 * state.zoom, s.w * state.zoom, s.h * state.zoom);
+      ctxOver.restore();
+      break;
+    }
+    case 'circle': {
+      const c = mapPxToCanvas(s.cx, s.cy);
+      ctxOver.arc(c.x, c.y, s.r * state.zoom, 0, Math.PI * 2);
+      break;
+    }
+    case 'ellipse': {
+      const c = mapPxToCanvas(s.cx, s.cy);
+      ctxOver.ellipse(c.x, c.y, s.rx * state.zoom, s.ry * state.zoom, s.theta || 0, 0, Math.PI * 2);
+      break;
+    }
+    case 'arc': {
+      const c = mapPxToCanvas(s.cx, s.cy);
+      ctxOver.arc(c.x, c.y, s.r * state.zoom, s.a0, s.a1, s.a1 < s.a0);
+      break;
+    }
+    case 'bezier': {
+      const a = mapPxToCanvas(s.p1.x, s.p1.y);
+      const c1 = mapPxToCanvas(s.c1.x, s.c1.y);
+      const c2 = mapPxToCanvas(s.c2.x, s.c2.y);
+      const b = mapPxToCanvas(s.p2.x, s.p2.y);
+      ctxOver.moveTo(a.x, a.y);
+      ctxOver.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, b.x, b.y);
+      break;
+    }
+  }
+}
+
+function drawHandle(x, y, color) {
+  ctxOver.fillStyle = '#FFFFFF';
+  ctxOver.strokeStyle = color;
+  ctxOver.lineWidth = 1.5;
+  ctxOver.beginPath();
+  ctxOver.arc(x, y, 4.5, 0, Math.PI * 2);
+  ctxOver.fill(); ctxOver.stroke();
+}
+
+function drawOriginMarker() {
+  if (!state.map || !state.meta) return;
+  // The marker shows where world (0, 0) lands on the map. The YAML "origin"
+  // tells us the world coordinates of the PGM's bottom-left corner, so
+  // world (0,0) sits at: (-origin_x, height - origin_y/res * (-1)) in map px,
+  // which is what worldToMapPx(0, 0) computes for us.
+  const op = worldToMapPx(0, 0);
+  const c = mapPxToCanvas(op.x, op.y);
+  const rect = canvasArea.getBoundingClientRect();
+
+  // If the marker is off-canvas, draw an edge indicator that points to it.
+  const onScreen = c.x >= 0 && c.x <= rect.width && c.y >= 0 && c.y <= rect.height;
+  if (!onScreen) {
+    drawOriginEdgeIndicator(c, rect);
+    return;
+  }
+
+  const L = 28;
+  // X axis (red, +world_x → +canvas_x)
+  ctxOver.strokeStyle = '#B85436'; ctxOver.lineWidth = 2.5; ctxOver.lineCap = 'round';
+  ctxOver.beginPath(); ctxOver.moveTo(c.x, c.y); ctxOver.lineTo(c.x + L, c.y); ctxOver.stroke();
+  ctxOver.beginPath();
+  ctxOver.moveTo(c.x + L, c.y);
+  ctxOver.lineTo(c.x + L - 6, c.y - 4);
+  ctxOver.lineTo(c.x + L - 6, c.y + 4);
+  ctxOver.closePath();
+  ctxOver.fillStyle = '#B85436'; ctxOver.fill();
+  ctxOver.fillStyle = '#B85436';
+  ctxOver.font = 'bold 11px ui-monospace, Menlo, monospace';
+  ctxOver.fillText('x', c.x + L + 4, c.y + 4);
+
+  // Y axis (green, +world_y → -canvas_y)
+  ctxOver.strokeStyle = '#5A7D3A';
+  ctxOver.beginPath(); ctxOver.moveTo(c.x, c.y); ctxOver.lineTo(c.x, c.y - L); ctxOver.stroke();
+  ctxOver.beginPath();
+  ctxOver.moveTo(c.x, c.y - L);
+  ctxOver.lineTo(c.x - 4, c.y - L + 6);
+  ctxOver.lineTo(c.x + 4, c.y - L + 6);
+  ctxOver.closePath();
+  ctxOver.fillStyle = '#5A7D3A'; ctxOver.fill();
+  ctxOver.fillStyle = '#5A7D3A';
+  ctxOver.fillText('y', c.x - 4, c.y - L - 4);
+
+  // center disc
+  ctxOver.fillStyle = '#FFFFFF';
+  ctxOver.strokeStyle = '#141413';
+  ctxOver.lineWidth = 1.5;
+  ctxOver.beginPath(); ctxOver.arc(c.x, c.y, 6, 0, Math.PI * 2); ctxOver.fill(); ctxOver.stroke();
+  // small dot inside
+  ctxOver.fillStyle = '#141413';
+  ctxOver.beginPath(); ctxOver.arc(c.x, c.y, 1.5, 0, Math.PI * 2); ctxOver.fill();
+  // label
+  ctxOver.font = '11px ui-monospace, Menlo, monospace';
+  ctxOver.fillText('(0,0)', c.x + 9, c.y + 20);
+  ctxOver.lineCap = 'butt';
+}
+
+// When the origin (world 0,0) is outside the canvas, draw a small chevron
+// at the canvas edge pointing toward it, so the user can find it visually.
+function drawOriginEdgeIndicator(target, rect) {
+  const cx = rect.width / 2, cy = rect.height / 2;
+  const dx = target.x - cx, dy = target.y - cy;
+  // Find intersection of ray (cx,cy → target) with viewport edges
+  const margin = 24;
+  const halfW = rect.width / 2 - margin, halfH = rect.height / 2 - margin;
+  const tx = Math.abs(dx) > 1e-6 ? halfW / Math.abs(dx) : Infinity;
+  const ty = Math.abs(dy) > 1e-6 ? halfH / Math.abs(dy) : Infinity;
+  const t = Math.min(tx, ty);
+  const ex = cx + dx * t, ey = cy + dy * t;
+  const angle = Math.atan2(dy, dx);
+
+  ctxOver.save();
+  ctxOver.translate(ex, ey);
+  ctxOver.rotate(angle);
+  // Background pill
+  ctxOver.fillStyle = '#FFFFFF';
+  ctxOver.strokeStyle = '#141413';
+  ctxOver.lineWidth = 1.5;
+  ctxOver.beginPath();
+  ctxOver.moveTo(-14, -10);
+  ctxOver.lineTo(8, -10);
+  ctxOver.lineTo(16, 0);
+  ctxOver.lineTo(8, 10);
+  ctxOver.lineTo(-14, 10);
+  ctxOver.closePath();
+  ctxOver.fill(); ctxOver.stroke();
+  ctxOver.restore();
+  // Label
+  ctxOver.fillStyle = '#141413';
+  ctxOver.font = 'bold 10px ui-monospace, Menlo, monospace';
+  ctxOver.textAlign = 'center';
+  ctxOver.fillText('(0,0)', ex, ey + 3);
+  ctxOver.textAlign = 'start';
+}
+
+
+// ============================================================
+// === HISTORY (UNDO / REDO) ===
+// ============================================================
+// We snapshot the entire mutable state into a JSON-serializable record.
+// Map/mask data uses raw Uint8Array; we store them as Array for JSON safety.
+
+function snapshotState() {
+  return {
+    label: '',
+    mapData: state.map ? Array.from(state.map.data) : null,
+    maskData: state.mask ? Array.from(state.mask.data) : null,
+    origin: state.meta ? [...state.meta.origin] : null,
+    shapes: [...state.shapes.values()].map(deepCopyShape),
+    selection: [...state.selection],
+    nextShapeId: state.nextShapeId,
+  };
+}
+
+function restoreState(snap) {
+  if (snap.mapData && state.map) {
+    state.map.data = new Uint8Array(snap.mapData);
+    rebuildMapImageData();
+  }
+  if (snap.maskData && state.mask) {
+    state.mask.data = new Uint8Array(snap.maskData);
+    rebuildMaskImageData();
+  }
+  if (snap.origin && state.meta) state.meta.origin = [...snap.origin];
+  state.shapes.clear();
+  snap.shapes.forEach(s => state.shapes.set(s.id, deepCopyShape(s)));
+  state.nextShapeId = snap.nextShapeId;
+  state.selection = new Set(snap.selection);
+  updateLayersUi();
+  updateShapeListUi();
+  updateSelectionStatus();
+  updateMetaUi();
+  renderPropsPanel();
+  redraw();
+}
+
+function saveHistory(label) {
+  if (!state.map) return;
+  // Drop redo branch
+  state.history = state.history.slice(0, state.historyIndex + 1);
+  const snap = snapshotState();
+  snap.label = label;
+  state.history.push(snap);
+  if (state.history.length > 50) state.history.shift();
+  state.historyIndex = state.history.length - 1;
+  updateUndoRedoUi();
+}
+
+function undo() {
+  if (state.historyIndex <= 0) return;
+  state.historyIndex--;
+  restoreState(state.history[state.historyIndex]);
+  updateUndoRedoUi();
+}
+function redo() {
+  if (state.historyIndex >= state.history.length - 1) return;
+  state.historyIndex++;
+  restoreState(state.history[state.historyIndex]);
+  updateUndoRedoUi();
+}
+
+function updateUndoRedoUi() {
+  document.getElementById('btn-undo').disabled = state.historyIndex <= 0;
+  document.getElementById('btn-redo').disabled = state.historyIndex >= state.history.length - 1;
+}
+document.getElementById('btn-undo').onclick = undo;
+document.getElementById('btn-redo').onclick = redo;
+
+// ============================================================
+// === SAVE / LOAD PROJECT ===
+// ============================================================
+
+function saveProject() {
+  if (!state.map || !state.meta) return;
+  const proj = {
+    type: 'sasmap',
+    version: 1,
+    meta: state.meta,
+    fileNames: state.fileNames,
+    map: {
+      width: state.map.width,
+      height: state.map.height,
+      maxval: 255,
+      data: btoa(String.fromCharCode(...state.map.data)),
+    },
+    mask: state.mask ? {
+      width: state.mask.width,
+      height: state.mask.height,
+      maxval: 255,
+      data: btoa(String.fromCharCode(...state.mask.data)),
+    } : null,
+    shapes: [...state.shapes.values()],
+    nextShapeId: state.nextShapeId,
+    layers: state.layers,
+  };
+  const blob = new Blob([JSON.stringify(proj)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = (state.fileNames.pgm || 'map').replace(/\.pgm$/i, '') + '.sasmap.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+document.getElementById('btn-save-project').onclick = saveProject;
+
+async function loadProject(proj) {
+  if (proj.type !== 'sasmap') throw new Error('Not a SAS map project file');
+  state.meta = proj.meta;
+  state.fileNames = proj.fileNames || {};
+  const decodeBase64 = b64 => {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+  if (proj.map) {
+    state.map = { width: proj.map.width, height: proj.map.height, maxval: 255,
+      data: decodeBase64(proj.map.data) };
+  }
+  if (proj.mask) {
+    state.mask = { width: proj.mask.width, height: proj.mask.height, maxval: 255,
+      data: decodeBase64(proj.mask.data) };
+  }
+  state.shapes.clear();
+  (proj.shapes || []).forEach(s => state.shapes.set(s.id, s));
+  state.nextShapeId = proj.nextShapeId || ((proj.shapes && proj.shapes.length) ? Math.max(...proj.shapes.map(s=>s.id)) + 1 : 1);
+  if (proj.layers) Object.assign(state.layers, proj.layers);
+  finishLoading();
+}
+
+// ============================================================
+// === DOWNLOAD (NAV2-COMPATIBLE EXPORT) ===
+// ============================================================
+
+function downloadMap() {
+  if (!state.map || !state.meta) return;
+  // Bake all shapes onto a temp copy of the map and mask, then export.
+  const tempMap = { ...state.map, data: new Uint8Array(state.map.data) };
+  const tempMask = state.mask
+    ? { ...state.mask, data: new Uint8Array(state.mask.data) }
+    : { width: state.map.width, height: state.map.height, maxval: 255,
+        data: new Uint8Array(state.map.width * state.map.height).fill(255) };
+  state.shapes.forEach(s => rasterizeShape(s, tempMap, tempMask));
+
+  const baseName = (state.fileNames.pgm || 'map').replace(/\.pgm$/i, '') + '_edited';
+  const pgmBlob = pgmToBlob(tempMap);
+  const yamlText = yamlToText(state.meta, baseName + '.pgm');
+  triggerDownload(pgmBlob, baseName + '.pgm');
+  triggerDownload(new Blob([yamlText], { type: 'text/yaml' }), baseName + '.yaml');
+
+  // Mask: only emit if there's any keepout (non-white) pixel OR shapes targeted at keepout
+  let hasKeepout = false;
+  for (let i = 0; i < tempMask.data.length; i++) {
+    if (tempMask.data[i] < 250) { hasKeepout = true; break; }
+  }
+  if (hasKeepout) {
+    const maskBase = baseName + '_keepout';
+    const maskMeta = { ...state.meta };
+    const maskYamlText = yamlToText(maskMeta, maskBase + '.pgm');
+    triggerDownload(pgmToBlob(tempMask), maskBase + '.pgm');
+    triggerDownload(new Blob([maskYamlText], { type: 'text/yaml' }), maskBase + '.yaml');
+  }
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+document.getElementById('btn-download').onclick = downloadMap;
+
+// ============================================================
+// === UTILITIES ===
+// ============================================================
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+// ============================================================
+// === BOOT ===
+// ============================================================
+
+resizeCanvases();
+updateLayersUi();
+updateUndoRedoUi();
+
+</script>
+</body>
+</html>

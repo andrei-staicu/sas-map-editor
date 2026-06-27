@@ -1,6 +1,6 @@
-<p align="center">
-# sas-map-editor
-</p>
+
+<h1 align="center">sas-map-editor</h1>
+
 
 <p align="center">
   <img src="assets/sas-logo.png" alt="SAS" width="120">

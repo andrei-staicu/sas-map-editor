@@ -90,6 +90,11 @@
   }
   button.subtle:hover { background: var(--surface-muted); color: var(--text); }
   button.full-btn { width: 100%; margin-top: 8px; }
+  .step-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 6px 0 4px; }
+  .step-row.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .step-row button { padding: 5px 0; font-size: 11px; font-family: ui-monospace, Menlo, monospace; min-width: 0; }
+  .note { font-size: 11px; color: var(--text-muted); line-height: 1.5; margin: 8px 0; }
+  .note.warn { border-left: 2px solid var(--accent); padding-left: 8px; }
   button.danger { color: var(--danger); border-color: var(--danger); }
   button.danger:hover { background: var(--danger); color: white; }
   input[type="text"]:focus, input[type="number"]:focus, select:focus {
@@ -566,7 +571,11 @@
       </button>
       <div class="toolbar-divider"></div>
       <button class="icon-btn" id="tool-measure" title="Measure (M)" disabled>Measure</button>
-      <button class="icon-btn" id="tool-origin" title="Move origin (O)" disabled>Origin</button>
+      <button class="icon-btn" id="tool-origin" title="Move / rotate origin (O)" disabled>Origin</button>
+      <button class="icon-btn" id="tool-rotate" title="Rotate map (T)" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+        Rotate
+      </button>
       <button class="icon-btn" id="tool-bucket" title="Bucket fill with current target (G)" disabled>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><path d="m19 11-8-8-8.6 8.6a2 2 0 0 0 0 2.8l5.2 5.2c.78.78 2.05.78 2.83 0L19 11Z"/><path d="m5 2 5 5"/><path d="M2 13h15"/><path d="M22 20a2 2 0 1 1-4 0c0-1.6 1.7-2.4 2-4 .3 1.6 2 2.4 2 4Z"/></svg>
         Bucket
@@ -709,8 +718,27 @@
         <input type="number" id="snap-step" value="0.1" min="0.01" step="0.01">
       </div>
       <label class="checkbox" style="display: flex; margin-bottom: 6px;">
-        <input type="checkbox" id="opt-grid"> Show grid
+        <input type="checkbox" id="opt-grid" checked> Show grid
       </label>
+      <div id="grid-rows">
+        <div class="prop-row">
+          <label>Cell (m)</label>
+          <input type="number" id="grid-step" value="1" min="0.01" step="0.05">
+        </div>
+        <div class="prop-row">
+          <label>Major every</label>
+          <input type="number" id="grid-major" value="5" min="1" max="20" step="1">
+        </div>
+        <div class="prop-row">
+          <label>Opacity</label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="range" id="grid-opacity" min="0.1" max="1" step="0.05" value="0.7">
+          </div>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin: 2px 0 8px; line-height: 1.45;">
+          Square metric grid anchored to world (0,0) and aligned with the world axes. Cells merge automatically when zoomed out.
+        </div>
+      </div>
       <label class="checkbox" style="display: flex; margin-bottom: 6px;">
         <input type="checkbox" id="opt-show-origin" checked> Show origin marker
       </label>
@@ -723,6 +751,8 @@
         <div><span class="kbd">W</span> wall · <span class="kbd">E</span> erase</div>
         <div><span class="kbd">U</span> unscan · <span class="kbd">K</span> keep-out</div>
         <div><span class="kbd">M</span> measure · <span class="kbd">O</span> origin · <span class="kbd">G</span> bucket</div>
+        <div><span class="kbd">T</span> rotate · <span class="kbd">,</span> <span class="kbd">.</span> map ±1° (<span class="kbd">Shift</span> 0.1°)</div>
+        <div><span class="kbd">Alt</span>+scroll rotate map · <span class="kbd">#</span> grid</div>
         <div><span class="kbd">B</span> brush · <span class="kbd">L</span> line · <span class="kbd">R</span> rect</div>
         <div><span class="kbd">Space</span>+drag pan · <span class="kbd">Shift</span>+scroll zoom</div>
         <div><span class="kbd">Shift</span> while drawing · constrain</div>
@@ -738,6 +768,8 @@
     <div class="status-item"><span class="label">px:</span><span class="val" id="status-px">—</span></div>
     <div class="status-item"><span class="label">world:</span><span class="val" id="status-world">—</span></div>
     <div class="status-spacer"></div>
+    <div class="status-item"><span class="label">rot:</span><span class="val" id="status-rot">0°</span></div>
+    <div class="status-item"><span class="label">grid:</span><span class="val" id="status-grid">off</span></div>
     <div class="status-item"><span class="label">selection:</span><span class="val" id="status-sel">none</span></div>
     <div class="status-item"><span class="label">zoom:</span><span class="val" id="status-zoom">100%</span></div>
     <div class="status-item"><span class="label">tool:</span><span class="val" id="status-tool">pan</span></div>
@@ -915,8 +947,18 @@ const state = {
   // options
   snap: false,
   snapStep: 0.1,
-  showGrid: false,
+  showGrid: true,
+  gridStep: 1.0,      // grid cell in meters
+  gridMajor: 5,       // major line every N cells
+  gridOpacity: 0.7,
   showOrigin: true,
+
+  // pending map rotation in degrees (CCW on screen). Non-destructive:
+  // baked into the raster on "Apply" or on Download.
+  mapRot: 0,
+  rotateDrag: null,     // { pivot, startAngle, startRot }
+  originRotDrag: null,  // { }
+  _wheelAcc: 0,
   showMask: true,
 
   // history
@@ -1038,6 +1080,7 @@ async function handleFiles(files) {
     if (mapPgm) {
       const buf = await mapPgm.arrayBuffer();
       state.map = parsePgm(new Uint8Array(buf));
+      state.mapRot = 0;
       state.mapDirty = false;
       state.fileNames.pgm = mapPgm.name;
     }
@@ -1072,6 +1115,8 @@ async function handleFiles(files) {
 }
 
 function finishLoading() {
+  _mapOffscreen = null; _maskOffscreen = null;
+  updateRotationStatus();
   updateLoadedFilesUi();
   updateMetaUi();
   updateLayersUi();
@@ -1113,7 +1158,7 @@ function updateMetaUi() {
 
 function enableAllTools() {
   ['tool-select','tool-pan','target-wall','target-erase','target-unscan','target-keepout',
-   'tool-measure','tool-origin','tool-bucket','btn-flatten',
+   'tool-measure','tool-origin','tool-rotate','tool-bucket','btn-flatten',
    'btn-undo','btn-redo','btn-save-project','btn-download'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = false;
@@ -1344,38 +1389,104 @@ function mouseToCanvas(e) {
   const rect = canvasArea.getBoundingClientRect();
   return { x: e.clientX - rect.left, y: e.clientY - rect.top };
 }
+// - "display px" = pixel coordinates of the map AFTER the pending rotation
+//   (state.mapRot) is applied. This is exactly the pixel grid of the exported
+//   PGM. When mapRot = 0, display px == map px. The YAML origin always refers
+//   to the display frame, so the panel always shows what will be exported.
+//
+// Shapes and the raster stay stored in (unrotated) map px until the rotation
+// is applied, so rotating is fully non-destructive.
+
+function normDeg(d) {
+  d = ((d + 180) % 360 + 360) % 360 - 180;
+  if (Math.abs(d) < 1e-9) d = 0;
+  return +d.toFixed(4);
+}
+function mapRotRad() { return (state.mapRot || 0) * Math.PI / 180; }
+function rotatedDims(w, h, deg) {
+  if (!deg) return { w, h };
+  const a = deg * Math.PI / 180;
+  const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+  return {
+    w: Math.max(1, Math.ceil(w * c + h * s - 1e-6)),
+    h: Math.max(1, Math.ceil(w * s + h * c - 1e-6)),
+  };
+}
+function dispDims() {
+  if (!state.map) return { w: 0, h: 0 };
+  return rotatedDims(state.map.width, state.map.height, state.mapRot);
+}
+// map px -> display px (visual CCW rotation about the image center)
+function mapToDisp(p) {
+  if (!state.mapRot || !state.map) return { x: p.x, y: p.y };
+  const a = mapRotRad(), c = Math.cos(a), s = Math.sin(a);
+  const d = dispDims();
+  const dx = p.x - state.map.width / 2, dy = p.y - state.map.height / 2;
+  return { x: d.w / 2 + c * dx + s * dy, y: d.h / 2 - s * dx + c * dy };
+}
+// display px -> map px
+function dispToMap(q) {
+  if (!state.mapRot || !state.map) return { x: q.x, y: q.y };
+  const a = mapRotRad(), c = Math.cos(a), s = Math.sin(a);
+  const d = dispDims();
+  const dx = q.x - d.w / 2, dy = q.y - d.h / 2;
+  return { x: state.map.width / 2 + c * dx - s * dy, y: state.map.height / 2 + s * dx + c * dy };
+}
+
 function canvasToMapPx(cx, cy) {
-  return { x: (cx - state.pan.x) / state.zoom, y: (cy - state.pan.y) / state.zoom };
+  return dispToMap({ x: (cx - state.pan.x) / state.zoom, y: (cy - state.pan.y) / state.zoom });
 }
 function mapPxToCanvas(mx, my) {
-  return { x: state.pan.x + mx * state.zoom, y: state.pan.y + my * state.zoom };
+  const q = mapToDisp({ x: mx, y: my });
+  return { x: state.pan.x + q.x * state.zoom, y: state.pan.y + q.y * state.zoom };
 }
+// ROS map_server convention: origin = pose (x, y, yaw) of the lower-left pixel
+// of the image in the world frame. yaw is applied here so the marker and the
+// coordinates reflect it.
 function mapPxToWorld(px, py) {
   if (!state.meta || !state.map) return { x: 0, y: 0 };
   const res = state.meta.resolution;
-  const [ox, oy] = state.meta.origin;
-  return { x: ox + px * res, y: oy + (state.map.height - py) * res };
+  const ox = state.meta.origin[0], oy = state.meta.origin[1], yaw = state.meta.origin[2] || 0;
+  const q = mapToDisp({ x: px, y: py });
+  const H2 = dispDims().h;
+  const u = q.x * res, v = (H2 - q.y) * res;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  return { x: ox + c * u - s * v, y: oy + s * u + c * v };
 }
 function worldToMapPx(wx, wy) {
   if (!state.meta || !state.map) return { x: 0, y: 0 };
   const res = state.meta.resolution;
-  const [ox, oy] = state.meta.origin;
-  return { x: (wx - ox) / res, y: state.map.height - (wy - oy) / res };
+  const ox = state.meta.origin[0], oy = state.meta.origin[1], yaw = state.meta.origin[2] || 0;
+  const H2 = dispDims().h;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const dx = wx - ox, dy = wy - oy;
+  const u = c * dx + s * dy, v = -s * dx + c * dy;
+  return dispToMap({ x: u / res, y: H2 - v / res });
+}
+function worldToCanvas(wx, wy) {
+  const p = worldToMapPx(wx, wy);
+  return mapPxToCanvas(p.x, p.y);
 }
 
+// Snap to the metric world grid (anchored at world 0,0, aligned to world axes).
 function snapMapPx(p) {
   if (!state.snap || !state.meta) return p;
-  const stepPx = state.snapStep / state.meta.resolution;
-  return { x: Math.round(p.x / stepPx) * stepPx, y: Math.round(p.y / stepPx) * stepPx };
+  const st = state.snapStep;
+  const w = mapPxToWorld(p.x, p.y);
+  return worldToMapPx(Math.round(w.x / st) * st, Math.round(w.y / st) * st);
 }
 
-// Apply Shift-constraint to a vector (dx, dy): snap angle to 0/45/90 deg.
+// Apply Shift-constraint to a vector (dx, dy) given in map px: snap the angle
+// to 0/45/90 deg as seen on screen (i.e. in the rotated display frame).
 function constrainShift(dx, dy) {
-  const a = Math.atan2(dy, dx);
+  const a0 = mapRotRad(), c = Math.cos(a0), s = Math.sin(a0);
+  const qx = c * dx + s * dy, qy = -s * dx + c * dy;
+  const a = Math.atan2(qy, qx);
   const step = Math.PI / 4;
   const snapped = Math.round(a / step) * step;
-  const r = Math.hypot(dx, dy);
-  return { dx: r * Math.cos(snapped), dy: r * Math.sin(snapped) };
+  const r = Math.hypot(qx, qy);
+  const rx = r * Math.cos(snapped), ry = r * Math.sin(snapped);
+  return { dx: c * rx - s * ry, dy: s * rx + c * ry };
 }
 
 // ============================================================
@@ -1386,11 +1497,12 @@ function autoFit() {
   if (!state.map) return;
   const rect = canvasArea.getBoundingClientRect();
   const pad = 40;
-  const sx = (rect.width  - pad * 2) / state.map.width;
-  const sy = (rect.height - pad * 2) / state.map.height;
+  const d = dispDims();
+  const sx = (rect.width  - pad * 2) / d.w;
+  const sy = (rect.height - pad * 2) / d.h;
   state.zoom = Math.min(sx, sy);
-  state.pan.x = (rect.width  - state.map.width  * state.zoom) / 2;
-  state.pan.y = (rect.height - state.map.height * state.zoom) / 2;
+  state.pan.x = (rect.width  - d.w * state.zoom) / 2;
+  state.pan.y = (rect.height - d.h * state.zoom) / 2;
   redraw();
 }
 function zoomBy(factor, anchor) {
@@ -1409,13 +1521,139 @@ document.getElementById('zoom-out').onclick = () => zoomBy(1/1.25, null);
 document.getElementById('zoom-fit').onclick = autoFit;
 canvasArea.addEventListener('wheel', e => {
   if (!state.map) return;
-  if (e.shiftKey) {
+  const c = mouseToCanvas(e);
+  if (e.shiftKey && !e.altKey) {
     e.preventDefault();
-    const c = mouseToCanvas(e);
     const factor = e.deltaY < 0 ? 1.12 : 1/1.12;
     zoomBy(factor, c);
+    return;
+  }
+  // Rotation by wheel: accumulate deltas so trackpads don't spin wildly.
+  const overOrigin = state.tool === 'origin' && state.meta && isNearOriginMarker(c, 60);
+  const rotMap = e.altKey || state.tool === 'rotate';
+  if (!overOrigin && !rotMap) return;
+  e.preventDefault();
+  let dy = e.deltaY;
+  if (e.deltaMode === 1) dy *= 33;
+  else if (e.deltaMode === 2) dy *= 400;
+  state._wheelAcc += dy;
+  const TH = 40;
+  let notches = 0;
+  while (state._wheelAcc <= -TH) { notches++; state._wheelAcc += TH; }
+  while (state._wheelAcc >= TH)  { notches--; state._wheelAcc -= TH; }
+  if (!notches) return;
+  if (overOrigin) {
+    const stepDeg = e.altKey ? 0.1 : 1;
+    saveHistoryCoalesced('Rotate origin');
+    setOriginFrameAngle(originFrameAngleDeg() + notches * stepDeg);
+  } else {
+    const stepDeg = (state.tool === 'rotate' && e.altKey) ? 0.1 : 1;
+    saveHistoryCoalesced('Rotate map');
+    setMapRotation(state.mapRot + notches * stepDeg, c);
   }
 }, { passive: false });
+
+// ============================================================
+// === MAP ROTATION (pending, non-destructive) ===
+// ============================================================
+
+// Change the pending rotation. Keeps the map point under `pivotCanvas`
+// fixed on screen, and keeps world (0,0) on the same physical spot of the map.
+function setMapRotation(deg, pivotCanvas, opts = {}) {
+  if (!state.map) return;
+  deg = normDeg(deg);
+  const rect = canvasArea.getBoundingClientRect();
+  const pivot = pivotCanvas || { x: rect.width / 2, y: rect.height / 2 };
+  const pm = canvasToMapPx(pivot.x, pivot.y);
+  const p0 = state.meta ? worldToMapPx(0, 0) : null;
+  state.mapRot = deg;
+  const after = mapPxToCanvas(pm.x, pm.y);
+  state.pan.x += pivot.x - after.x;
+  state.pan.y += pivot.y - after.y;
+  if (p0) setOriginFromMapPx(p0.x, p0.y);
+  updateMetaUi();
+  updateRotationStatus();
+  if (opts.panel !== false) renderPropsPanel();
+  redraw();
+}
+
+function updateRotationStatus() {
+  const el = document.getElementById('status-rot');
+  if (el) el.textContent = (+state.mapRot.toFixed(2)) + '°' + (state.mapRot ? ' (pending)' : '');
+}
+
+// Coalesce many small history entries (wheel / keys) into one per burst.
+let _lastHistLabel = null, _lastHistT = 0;
+function saveHistoryCoalesced(label) {
+  const now = Date.now();
+  if (_lastHistLabel === label && now - _lastHistT < 1200 &&
+      state.historyIndex === state.history.length - 1) {
+    _lastHistT = now;
+    return;
+  }
+  _lastHistLabel = label; _lastHistT = now;
+  saveHistory(label);
+}
+
+// Nearest-neighbour rotation of a raster (keeps trinary values exact).
+function rotateRasterBuf(img, deg, fill) {
+  const W = img.width, H = img.height;
+  const { w: W2, h: H2 } = rotatedDims(W, H, deg);
+  const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  const src = img.data;
+  const out = new Uint8Array(W2 * H2).fill(fill);
+  const cx = W / 2, cy = H / 2, cx2 = W2 / 2, cy2 = H2 / 2;
+  for (let y2 = 0; y2 < H2; y2++) {
+    const dy = y2 + 0.5 - cy2;
+    let row = y2 * W2;
+    for (let x2 = 0; x2 < W2; x2++) {
+      const dx = x2 + 0.5 - cx2;
+      const px = Math.floor(cx + c * dx - s * dy);
+      const py = Math.floor(cy + s * dx + c * dy);
+      if (px >= 0 && py >= 0 && px < W && py < H) out[row + x2] = src[py * W + px];
+    }
+  }
+  return { width: W2, height: H2, maxval: img.maxval || 255, data: out };
+}
+
+// Transform one shape from map px into display px using the current mapRot.
+function transformShapeByRotation(s) {
+  const a = mapRotRad();
+  const T = p => mapToDisp(p);
+  switch (s.kind) {
+    case 'line': s.p1 = T(s.p1); s.p2 = T(s.p2); break;
+    case 'bezier': s.p1 = T(s.p1); s.p2 = T(s.p2); s.c1 = T(s.c1); s.c2 = T(s.c2); break;
+    case 'polyline': case 'polygon': case 'freepath':
+      s.points = s.points.map(T); break;
+    case 'rect': {
+      const cc = T({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
+      delete s.x; delete s.y;
+      s.kind = 'rrect'; s.cx = cc.x; s.cy = cc.y; s.theta = -a;
+      break;
+    }
+    case 'rrect': { const cc = T({ x: s.cx, y: s.cy }); s.cx = cc.x; s.cy = cc.y; s.theta = (s.theta || 0) - a; break; }
+    case 'ellipse': { const cc = T({ x: s.cx, y: s.cy }); s.cx = cc.x; s.cy = cc.y; s.theta = (s.theta || 0) - a; break; }
+    case 'circle': { const cc = T({ x: s.cx, y: s.cy }); s.cx = cc.x; s.cy = cc.y; break; }
+    case 'arc': { const cc = T({ x: s.cx, y: s.cy }); s.cx = cc.x; s.cy = cc.y; s.a0 -= a; s.a1 -= a; break; }
+  }
+}
+
+// Bake the pending rotation into raster, keep-out mask and shapes.
+function applyMapRotation() {
+  if (!state.map || !state.mapRot) return;
+  saveHistory('Apply rotation');
+  const deg = state.mapRot;
+  state.shapes.forEach(sh => transformShapeByRotation(sh));
+  const unknown = TARGET_INFO.unscan.value;
+  state.map = rotateRasterBuf(state.map, deg, unknown);
+  if (state.mask) state.mask = rotateRasterBuf(state.mask, deg, 255);
+  // Display frame == new raster frame, so pan/zoom and the YAML origin stay valid.
+  state.mapRot = 0;
+  rebuildMapImageData();
+  rebuildMaskImageData();
+  updateMetaUi(); updateRotationStatus(); updateShapeListUi(); renderPropsPanel(); redraw();
+}
+
 
 
 // ============================================================
@@ -1967,9 +2205,12 @@ function shapeHandles(s) {
     }
     case 'circle': h.center = {x: s.cx, y: s.cy}; h.r = {x: s.cx + s.r, y: s.cy}; break;
     case 'ellipse':
-      h.center = {x: s.cx, y: s.cy};
-      h.rx = {x: s.cx + s.rx, y: s.cy};
-      h.ry = {x: s.cx, y: s.cy + s.ry};
+      {
+        const t = s.theta || 0, ct = Math.cos(t), st = Math.sin(t);
+        h.center = {x: s.cx, y: s.cy};
+        h.rx = {x: s.cx + s.rx * ct, y: s.cy + s.rx * st};
+        h.ry = {x: s.cx - s.ry * st, y: s.cy + s.ry * ct};
+      }
       break;
     case 'arc':
       h.center = {x: s.cx, y: s.cy};
@@ -2050,8 +2291,12 @@ function applyHandleDelta(s, handleName, newMapPx, shiftDown) {
     }
     case 'ellipse': {
       if (handleName === 'center') { s.cx = newMapPx.x; s.cy = newMapPx.y; }
-      else if (handleName === 'rx') s.rx = Math.max(1, Math.abs(newMapPx.x - s.cx));
-      else if (handleName === 'ry') s.ry = Math.max(1, Math.abs(newMapPx.y - s.cy));
+      else {
+        const t = s.theta || 0, ct = Math.cos(t), st = Math.sin(t);
+        const dx = newMapPx.x - s.cx, dy = newMapPx.y - s.cy;
+        if (handleName === 'rx') s.rx = Math.max(1, Math.abs(dx * ct + dy * st));
+        else if (handleName === 'ry') s.ry = Math.max(1, Math.abs(-dx * st + dy * ct));
+      }
       break;
     }
     case 'arc': {
@@ -2247,7 +2492,9 @@ canvasArea.addEventListener('mousedown', e => {
   } else if (state.tool === 'measure') {
     handleMeasureMouseDown(c, mp);
   } else if (state.tool === 'origin') {
-    handleOriginMouseDown(c, mp);
+    handleOriginMouseDown(c, mp, e);
+  } else if (state.tool === 'rotate') {
+    handleRotateMouseDown(c, mp, e);
   } else if (state.tool === 'bucket') {
     bucketFillAt(mp);
   } else if (state.tool === 'select') {
@@ -2279,7 +2526,9 @@ window.addEventListener('mousemove', e => {
   } else if (state.tool === 'measure') {
     handleMeasureMouseMove(c, mp);
   } else if (state.tool === 'origin') {
-    handleOriginMouseMove(c, mp);
+    handleOriginMouseMove(c, mp, e);
+  } else if (state.tool === 'rotate') {
+    handleRotateMouseMove(c, mp, e);
   } else if (state.tool === 'select') {
     handleSelectMouseMove(c, mp);
   }
@@ -2296,6 +2545,7 @@ window.addEventListener('mouseup', e => {
   if (state.tool === 'draw') handleShapeMouseUp(c, mp);
   else if (state.tool === 'measure') handleMeasureMouseUp(c, mp);
   else if (state.tool === 'origin') handleOriginMouseUp(c, mp);
+  else if (state.tool === 'rotate') handleRotateMouseUp(c, mp);
   else if (state.tool === 'select') handleSelectMouseUp(c, mp);
 });
 
@@ -2305,6 +2555,7 @@ function cursorForTool() {
   if (state.tool === 'draw') return 'crosshair';
   if (state.tool === 'measure') return 'crosshair';
   if (state.tool === 'origin') return 'crosshair';
+  if (state.tool === 'rotate') return 'alias';
   if (state.tool === 'bucket') return 'crosshair';
   if (state.tool === 'select') return 'default';
   return 'default';
@@ -2362,6 +2613,19 @@ window.addEventListener('keydown', e => {
   if (e.key === 'k' || e.key === 'K') { setDrawTarget('keepout'); setTool('draw'); }
   if (e.key === 'm' || e.key === 'M') setTool('measure');
   if (e.key === 'o' || e.key === 'O') setTool('origin');
+  if (e.key === 't' || e.key === 'T') setTool('rotate');
+  if (e.key === '#') {
+    state.showGrid = !state.showGrid;
+    document.getElementById('opt-grid').checked = state.showGrid;
+    updateGridUi(); redraw();
+  }
+  if (state.map && (e.code === 'Comma' || e.code === 'Period')) {
+    e.preventDefault();
+    const step = e.shiftKey ? 0.1 : 1;
+    saveHistoryCoalesced('Rotate map');
+    setMapRotation(state.mapRot + (e.code === 'Comma' ? step : -step));
+    return;
+  }
   if (e.key === 'g' || e.key === 'G') setTool('bucket');
   if (e.key === 'b' || e.key === 'B') { setDrawKind('freepath'); if (state.tool !== 'draw') setTool('draw'); }
   if (e.key === 'l' || e.key === 'L') { setDrawKind('line');     if (state.tool !== 'draw') setTool('draw'); }
@@ -2420,46 +2684,113 @@ function handleMeasureMouseUp(c, mp) {
 function setOriginFromMapPx(mpx, mpy) {
   if (!state.meta || !state.map) return;
   const res = state.meta.resolution;
-  const h = state.map.height;
-  state.meta.origin[0] = +(-mpx * res).toFixed(6);
-  state.meta.origin[1] = +(-(h - mpy) * res).toFixed(6);
+  const yaw = state.meta.origin[2] || 0;
+  const q = mapToDisp({ x: mpx, y: mpy });
+  const H2 = dispDims().h;
+  const u = q.x * res, v = (H2 - q.y) * res;
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  state.meta.origin[0] = +(-(c * u - s * v)).toFixed(6);
+  state.meta.origin[1] = +(-(s * u + c * v)).toFixed(6);
 }
 
-function handleOriginMouseDown(c, mp) {
+// Frame angle as seen on the map: the world x axis is rotated by -yaw relative
+// to the image (ROS yaw rotates the IMAGE inside the world). We expose the
+// intuitive value: degrees CCW of the world x axis on the map.
+function originFrameAngleDeg() {
+  if (!state.meta) return 0;
+  return -(state.meta.origin[2] || 0) * 180 / Math.PI;
+}
+// Rotate the world frame about world (0,0), keeping (0,0) on the same map spot.
+function setOriginFrameAngle(deg, opts = {}) {
   if (!state.meta || !state.map) return;
-  // Position of world (0,0) on the map, in canvas px
+  deg = normDeg(deg);
+  const p0 = worldToMapPx(0, 0);
+  state.meta.origin[2] = +(-deg * Math.PI / 180).toFixed(6);
+  if (Math.abs(state.meta.origin[2]) < 1e-9) state.meta.origin[2] = 0;
+  setOriginFromMapPx(p0.x, p0.y);
+  updateMetaUi();
+  if (opts.panel !== false) renderPropsPanel();
+  redraw();
+}
+// Rotate the map so the current world frame becomes axis-aligned, yaw -> 0.
+// This is what Nav2 actually honours (costmaps / AMCL ignore yaw in map.yaml).
+function straightenMapToFrame() {
+  if (!state.meta || !state.map) return;
+  const yawDeg = (state.meta.origin[2] || 0) * 180 / Math.PI;
+  if (Math.abs(yawDeg) < 1e-9) return;
+  saveHistory('Straighten map to frame');
+  const p0 = worldToMapPx(0, 0);
+  state.meta.origin[2] = 0;
+  setMapRotation(state.mapRot + yawDeg);
+  setOriginFromMapPx(p0.x, p0.y);
+  updateMetaUi(); renderPropsPanel(); redraw();
+}
+
+const ORIGIN_KNOB_R = 46;
+function originMarkerCanvas() {
   const op = worldToMapPx(0, 0);
-  const oc = mapPxToCanvas(op.x, op.y);
-  const distCanvas = Math.hypot(c.x - oc.x, c.y - oc.y);
-  if (distCanvas <= 18) {
-    // Drag the existing marker
-    state.originDrag = {
-      startCanvasX: c.x, startCanvasY: c.y,
-      origOriginX: state.meta.origin[0],
-      origOriginY: state.meta.origin[1],
-      didMove: false,
-    };
+  return mapPxToCanvas(op.x, op.y);
+}
+function originKnobCanvas() {
+  const oc = originMarkerCanvas();
+  const yaw = state.meta.origin[2] || 0;   // canvas angle of world +x
+  return { x: oc.x + ORIGIN_KNOB_R * Math.cos(yaw), y: oc.y + ORIGIN_KNOB_R * Math.sin(yaw) };
+}
+function isNearOriginMarker(c, r) {
+  if (!state.meta || !state.map) return false;
+  const oc = originMarkerCanvas();
+  return Math.hypot(c.x - oc.x, c.y - oc.y) <= r;
+}
+function roundAngleStep(deg, e) {
+  const step = (e && e.shiftKey) ? 15 : (e && e.altKey) ? 0.1 : 1;
+  return Math.round(deg / step) * step;
+}
+
+function handleOriginMouseDown(c, mp, e) {
+  if (!state.meta || !state.map) return;
+  const oc = originMarkerCanvas();
+  const kn = originKnobCanvas();
+  if (state.showOrigin && Math.hypot(c.x - kn.x, c.y - kn.y) <= 10) {
+    saveHistory('Rotate origin');
+    state.originRotDrag = { active: true };
+    return;
+  }
+  if (Math.hypot(c.x - oc.x, c.y - oc.y) <= 18) {
+    // Drag the existing marker (keeps the grab offset, no jump)
+    const op = worldToMapPx(0, 0);
+    state.originDrag = { offX: mp.x - op.x, offY: mp.y - op.y, didMove: false };
     saveHistory('Drag origin');
   } else {
     // Click somewhere else: set world (0,0) at this map pixel
     saveHistory('Set origin');
-    setOriginFromMapPx(mp.x, mp.y);
+    const sp = snapMapPx(mp);
+    setOriginFromMapPx(sp.x, sp.y);
     updateMetaUi();
     renderPropsPanel();
     redraw();
   }
 }
-function handleOriginMouseMove(c, mp) {
-  if (!state.originDrag || !state.meta) return;
-  const res = state.meta.resolution;
-  // Mouse delta in canvas px → translate origin in world m
-  // origin_x grows when (0,0) moves LEFT on screen (because origin_x is the
-  // world coordinate of the PGM corner; if we move (0,0) right, the corner
-  // appears to shift left relative to (0,0), so origin_x decreases).
-  const dx = (c.x - state.originDrag.startCanvasX) / state.zoom * res;
-  const dy = (c.y - state.originDrag.startCanvasY) / state.zoom * res;
-  state.meta.origin[0] = +(state.originDrag.origOriginX - dx).toFixed(6);
-  state.meta.origin[1] = +(state.originDrag.origOriginY + dy).toFixed(6);
+function handleOriginMouseMove(c, mp, e) {
+  if (!state.meta || !state.map) return;
+  if (state.originRotDrag) {
+    const oc = originMarkerCanvas();
+    const ang = Math.atan2(c.y - oc.y, c.x - oc.x);      // canvas angle (CW+)
+    const deg = roundAngleStep(-ang * 180 / Math.PI, e); // CCW+ on map
+    setOriginFrameAngle(deg);
+    return;
+  }
+  if (!state.originDrag) {
+    // hover feedback on the knob
+    if (state.tool === 'origin' && state.showOrigin) {
+      const kn = originKnobCanvas();
+      const near = Math.hypot(c.x - kn.x, c.y - kn.y) <= 10;
+      canvasArea.style.cursor = near ? 'grab' : (isNearOriginMarker(c, 18) ? 'move' : 'crosshair');
+    }
+    return;
+  }
+  let p = { x: mp.x - state.originDrag.offX, y: mp.y - state.originDrag.offY };
+  p = snapMapPx(p);
+  setOriginFromMapPx(p.x, p.y);
   state.originDrag.didMove = true;
   updateMetaUi();
   renderPropsPanel();
@@ -2467,6 +2798,33 @@ function handleOriginMouseMove(c, mp) {
 }
 function handleOriginMouseUp(c, mp) {
   state.originDrag = null;
+  state.originRotDrag = null;
+}
+
+// === ROTATE TOOL ===
+// Drag anywhere: the map turns around the centre of the view. 1° steps,
+// Shift = 15°, Alt = 0.1°. Wheel = ±1° per notch (Alt = 0.1°).
+function handleRotateMouseDown(c, mp, e) {
+  const rect = canvasArea.getBoundingClientRect();
+  const pivot = { x: rect.width / 2, y: rect.height / 2 };
+  saveHistory('Rotate map');
+  state.rotateDrag = {
+    pivot,
+    startAngle: Math.atan2(c.y - pivot.y, c.x - pivot.x),
+    startRot: state.mapRot,
+  };
+  redraw();
+}
+function handleRotateMouseMove(c, mp, e) {
+  const d = state.rotateDrag;
+  if (!d) return;
+  const ang = Math.atan2(c.y - d.pivot.y, c.x - d.pivot.x);
+  let delta = (ang - d.startAngle) * 180 / Math.PI;  // CW+ on screen
+  const deg = roundAngleStep(d.startRot - delta, e);
+  setMapRotation(deg, d.pivot);
+}
+function handleRotateMouseUp(c, mp) {
+  if (state.rotateDrag) { state.rotateDrag = null; redraw(); }
 }
 
 
@@ -2588,12 +2946,18 @@ function handleShapeMouseDown(c, mp, e) {
       s.p1 = { ...sp }; s.p2 = { ...sp };
       break;
     case 'rect':
-      s = newShapeBase('rect');
-      s.x = sp.x; s.y = sp.y; s.w = 0; s.h = 0;
+      if (state.mapRot) {
+        // Map is rotated on screen: draw a screen-aligned box (stored as rrect).
+        s = newShapeBase('rrect');
+        s.cx = sp.x; s.cy = sp.y; s.w = 0; s.h = 0; s.theta = mapRotRad();
+      } else {
+        s = newShapeBase('rect');
+        s.x = sp.x; s.y = sp.y; s.w = 0; s.h = 0;
+      }
       break;
     case 'rrect':
       s = newShapeBase('rrect');
-      s.cx = sp.x; s.cy = sp.y; s.w = 0; s.h = 0; s.theta = 0;
+      s.cx = sp.x; s.cy = sp.y; s.w = 0; s.h = 0; s.theta = mapRotRad();
       break;
     case 'circle':
       s = newShapeBase('circle');
@@ -2601,7 +2965,7 @@ function handleShapeMouseDown(c, mp, e) {
       break;
     case 'ellipse':
       s = newShapeBase('ellipse');
-      s.cx = sp.x; s.cy = sp.y; s.rx = 0; s.ry = 0; s.theta = 0;
+      s.cx = sp.x; s.cy = sp.y; s.rx = 0; s.ry = 0; s.theta = mapRotRad();
       break;
     case 'arc':
       s = newShapeBase('arc');
@@ -2651,16 +3015,20 @@ function handleShapeMouseMove(c, mp) {
       s.x = Math.min(a.x, p.x); s.y = Math.min(a.y, p.y);
       s.w = Math.abs(p.x - a.x); s.h = Math.abs(p.y - a.y);
       break;
-    case 'rrect':
-      s.w = Math.abs(p.x - a.x); s.h = Math.abs(p.y - a.y);
+    case 'rrect': {
+      const qa = mapToDisp(a), qp = mapToDisp(p);
+      s.w = Math.abs(qp.x - qa.x); s.h = Math.abs(qp.y - qa.y);
       s.cx = (a.x + p.x) / 2; s.cy = (a.y + p.y) / 2;
       break;
+    }
     case 'circle':
       s.r = Math.hypot(p.x - a.x, p.y - a.y);
       break;
-    case 'ellipse':
-      s.rx = Math.abs(p.x - a.x); s.ry = Math.abs(p.y - a.y);
+    case 'ellipse': {
+      const qa = mapToDisp(a), qp = mapToDisp(p);
+      s.rx = Math.abs(qp.x - qa.x); s.ry = Math.abs(qp.y - qa.y);
       break;
+    }
     case 'arc':
       s.r = Math.hypot(p.x - a.x, p.y - a.y);
       s.a0 = 0; s.a1 = Math.PI;
@@ -2761,7 +3129,7 @@ function handleSelectMouseDown(c, mp, e) {
   } else {
     // Start box-select
     if (!e.shiftKey) state.selection.clear();
-    state.boxSelect = { startMapPx: mp, currentMapPx: mp };
+    state.boxSelect = { startMapPx: mp, currentMapPx: mp, startC: c, curC: c };
     updateShapeListUi();
     updateSelectionStatus();
     renderPropsPanel();
@@ -2802,6 +3170,7 @@ function handleSelectMouseMove(c, mp) {
   }
   if (state.boxSelect) {
     state.boxSelect.currentMapPx = mp;
+    state.boxSelect.curC = c;
     redraw();
     return;
   }
@@ -2823,12 +3192,14 @@ function handleSelectMouseUp(c, mp) {
   if (state.shapeHandleDrag) { state.shapeHandleDrag = null; return; }
   if (state.shapeDragMove)   { state.shapeDragMove = null; return; }
   if (state.boxSelect) {
-    const a = state.boxSelect.startMapPx, b = state.boxSelect.currentMapPx;
+    const a = state.boxSelect.startC, b = state.boxSelect.curC;
     const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
     const y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
     state.shapes.forEach((s, id) => {
       const bb = shapeBBox(s);
-      if (bb.x0 >= x0 && bb.x1 <= x1 && bb.y0 >= y0 && bb.y1 <= y1) {
+      const cs = [[bb.x0, bb.y0], [bb.x1, bb.y0], [bb.x1, bb.y1], [bb.x0, bb.y1]]
+        .map(([x, y]) => mapPxToCanvas(x, y));
+      if (cs.every(p => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1)) {
         state.selection.add(id);
       }
     });
@@ -2855,6 +3226,7 @@ function setTool(tool) {
   document.getElementById('tool-select').classList.toggle('active', tool === 'select');
   document.getElementById('tool-measure').classList.toggle('active', tool === 'measure');
   document.getElementById('tool-origin').classList.toggle('active', tool === 'origin');
+  document.getElementById('tool-rotate').classList.toggle('active', tool === 'rotate');
   document.getElementById('tool-bucket').classList.toggle('active', tool === 'bucket');
   // Target button highlights only when in draw/bucket tool
   document.querySelectorAll('.target-btn').forEach(b => {
@@ -2875,6 +3247,7 @@ document.getElementById('tool-pan').onclick     = () => setTool('pan');
 document.getElementById('tool-select').onclick  = () => setTool('select');
 document.getElementById('tool-measure').onclick = () => setTool('measure');
 document.getElementById('tool-origin').onclick  = () => setTool('origin');
+document.getElementById('tool-rotate').onclick  = () => setTool('rotate');
 document.getElementById('tool-bucket').onclick  = () => setTool('bucket');
 document.getElementById('btn-flatten').onclick  = () => flattenSelectedShapes();
 
@@ -2888,8 +3261,29 @@ document.getElementById('snap-step').addEventListener('change', e => {
 });
 document.getElementById('opt-grid').addEventListener('change', e => {
   state.showGrid = e.target.checked;
+  updateGridUi();
   redraw();
 });
+document.getElementById('grid-step').addEventListener('change', e => {
+  const v = parseFloat(e.target.value);
+  state.gridStep = (v > 0) ? v : 1;
+  e.target.value = state.gridStep;
+  redraw();
+});
+document.getElementById('grid-major').addEventListener('change', e => {
+  const v = parseInt(e.target.value, 10);
+  state.gridMajor = Math.max(1, Math.min(50, isNaN(v) ? 5 : v));
+  e.target.value = state.gridMajor;
+  redraw();
+});
+document.getElementById('grid-opacity').addEventListener('input', e => {
+  state.gridOpacity = parseFloat(e.target.value) || 0.7;
+  redraw();
+});
+function updateGridUi() {
+  document.getElementById('grid-rows').style.display = state.showGrid ? '' : 'none';
+}
+updateGridUi();
 document.getElementById('opt-show-origin').addEventListener('change', e => {
   state.showOrigin = e.target.checked;
   redraw();
@@ -3039,6 +3433,8 @@ function renderPropsPanel() {
   if (state.selection.size === 0) {
     if (state.tool === 'origin') {
       renderOriginProps(content);
+    } else if (state.tool === 'rotate') {
+      renderRotateProps(content);
     } else {
       empty.style.display = 'block';
       content.style.display = 'none';
@@ -3147,6 +3543,57 @@ function renderPropsPanel() {
     ['Delete shape']));
 }
 
+function stepButtons(steps, onStep, cls) {
+  const row = el('div', { class: 'step-row' + (cls ? ' ' + cls : '') });
+  steps.forEach(v => {
+    row.appendChild(el('button', { onclick: () => onStep(v), title: (v > 0 ? '+' : '') + v + '°' },
+      [(v > 0 ? '+' : '\u2212') + Math.abs(v) + '°']));
+  });
+  return row;
+}
+
+function renderRotateProps(content) {
+  if (!state.map) return;
+  content.appendChild(el('div', { style: 'font-family: var(--serif); font-style: italic; font-size: 16px; margin-bottom: 8px;' },
+    ['Map rotation']));
+  content.appendChild(el('div', { class: 'note' },
+    ['Turns the whole map (raster, keep-out and shapes). The grid and the world frame stay fixed on screen, so rotate until the walls line up with the grid. Non-destructive: baked on Apply or on Download.']));
+
+  const deg = state.mapRot;
+  const angIn = el('input', { type: 'number', step: '0.1', value: String(+deg.toFixed(3)) });
+  angIn.addEventListener('change', () => {
+    saveHistory('Rotate map');
+    setMapRotation(parseFloat(angIn.value) || 0);
+  });
+  content.appendChild(propRow('Angle (° CCW)', angIn));
+
+  const slider = el('input', { type: 'range', min: '-180', max: '180', step: '0.1', value: String(deg), style: 'width: 100%;' });
+  slider.addEventListener('pointerdown', () => saveHistory('Rotate map'));
+  slider.addEventListener('input', () => {
+    setMapRotation(parseFloat(slider.value) || 0, null, { panel: false });
+    angIn.value = String(+state.mapRot.toFixed(3));
+  });
+  slider.addEventListener('change', () => renderPropsPanel());
+  content.appendChild(slider);
+
+  const step = v => { saveHistoryCoalesced('Rotate map'); setMapRotation(state.mapRot + v); };
+  content.appendChild(stepButtons([-90, -1, -0.1, 0.1, 1, 90], step));
+
+  const d = dispDims();
+  content.appendChild(el('div', { style: 'font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-muted); margin: 6px 0;' },
+    [`output: ${d.w} \u00d7 ${d.h} px` + (deg ? `  (was ${state.map.width} \u00d7 ${state.map.height})` : '')]));
+
+  content.appendChild(el('button', { class: 'full-btn', onclick: () => {
+    if (!state.mapRot) return;
+    saveHistory('Reset rotation'); setMapRotation(0);
+  }}, ['Reset to 0°']));
+  const apply = el('button', { class: 'full-btn', onclick: () => applyMapRotation() }, ['Apply rotation to raster now']);
+  if (!deg) apply.disabled = true;
+  content.appendChild(apply);
+  content.appendChild(el('div', { class: 'note' },
+    ['Drag on the canvas to turn (1° steps, Shift = 15°, Alt = 0.1°). Scroll = ±1° per notch, Alt+scroll works from any tool. Keys , and . = ±1°, with Shift = ±0.1°. New pixels around the rotated map are written as unknown (205).']));
+}
+
 function renderOriginProps(content) {
   if (!state.meta || !state.map) return;
   content.appendChild(el('div', { style: 'font-family: var(--serif); font-style: italic; font-size: 16px; margin-bottom: 8px;' },
@@ -3185,6 +3632,32 @@ function renderOriginProps(content) {
     saveHistory('Set origin'); state.meta.origin[2] = v; updateMetaUi(); renderPropsPanel(); redraw();
   }, { step: 0.05 })));
 
+  // ---- Frame rotation ----
+  content.appendChild(el('h4', {}, ['Frame rotation']));
+  const fa = originFrameAngleDeg();
+  const faIn = el('input', { type: 'number', step: '1', value: String(+fa.toFixed(3)) });
+  faIn.addEventListener('change', () => {
+    saveHistory('Rotate origin');
+    setOriginFrameAngle(parseFloat(faIn.value) || 0);
+  });
+  content.appendChild(propRow('x axis (° CCW)', faIn));
+  content.appendChild(stepButtons([-15, -1, 1, 15], v => {
+    saveHistoryCoalesced('Rotate origin');
+    setOriginFrameAngle(originFrameAngleDeg() + v);
+  }, 'cols-4'));
+  content.appendChild(el('div', { class: 'note' },
+    ['Drag the round knob on the marker ring (1° steps, Shift = 15°, Alt = 0.1°) or scroll over the marker. The frame turns around world (0,0).']));
+  if (Math.abs(fa) > 1e-9) {
+    content.appendChild(el('div', { class: 'note warn' },
+      ['Heads-up: Nav2 costmaps and AMCL ignore the yaw stored in map.yaml. To make this frame real for Nav2, straighten the map: it gets rotated so this frame becomes axis-aligned, and yaw goes back to 0.']));
+    content.appendChild(el('button', { class: 'full-btn', onclick: () => straightenMapToFrame() },
+      ['Straighten map to this frame']));
+    content.appendChild(el('button', { class: 'full-btn', onclick: () => {
+      saveHistory('Reset frame rotation'); setOriginFrameAngle(0);
+    }}, ['Reset frame rotation to 0°']));
+  }
+
+  content.appendChild(el('h4', {}, ['Reset']));
   const resetBtn = el('button', { class: 'full-btn', onclick: () => {
     saveHistory('Reset origin'); state.meta.origin = [0, 0, 0]; updateMetaUi(); renderPropsPanel(); redraw();
   }}, ['Reset to (0, 0, 0)']);
@@ -3218,18 +3691,32 @@ function redraw() {
   ctxMap.imageSmoothingEnabled = false;
   ctxMask.imageSmoothingEnabled = false;
 
-  const w = state.map.width  * state.zoom;
-  const h = state.map.height * state.zoom;
+  // Map px -> canvas: pan + zoom * R(mapRot) about the image centre.
+  const W = state.map.width, H = state.map.height;
+  const dd = dispDims();
+  const applyMapTransform = (ctx) => {
+    ctx.translate(state.pan.x, state.pan.y);
+    ctx.scale(state.zoom, state.zoom);
+    if (state.mapRot) {
+      ctx.translate(dd.w / 2, dd.h / 2);
+      ctx.rotate(-mapRotRad());
+      ctx.translate(-W / 2, -H / 2);
+    }
+  };
 
   if (state.layers.map.visible && _mapOffscreen) {
+    ctxMap.save();
     ctxMap.globalAlpha = state.layers.map.opacity;
-    ctxMap.drawImage(_mapOffscreen, state.pan.x, state.pan.y, w, h);
-    ctxMap.globalAlpha = 1;
+    applyMapTransform(ctxMap);
+    ctxMap.drawImage(_mapOffscreen, 0, 0, W, H);
+    ctxMap.restore();
   }
   if (state.layers.mask.visible && _maskOffscreen) {
+    ctxMask.save();
     ctxMask.globalAlpha = state.layers.mask.opacity;
-    ctxMask.drawImage(_maskOffscreen, state.pan.x, state.pan.y, w, h);
-    ctxMask.globalAlpha = 1;
+    applyMapTransform(ctxMask);
+    ctxMask.drawImage(_maskOffscreen, 0, 0, state.mask.width, state.mask.height);
+    ctxMask.restore();
   }
 
   // Vector overlay
@@ -3241,23 +3728,19 @@ function redraw() {
 function drawOverlay(rect) {
   ctxOver.save();
 
-  // Grid (in meters)
-  if (state.showGrid && state.meta) {
-    const stepM = state.snapStep > 0 ? state.snapStep : 0.5;
-    const stepCanvas = (stepM / state.meta.resolution) * state.zoom;
-    if (stepCanvas >= 8) {
-      ctxOver.strokeStyle = 'rgba(20,20,19,0.06)';
-      ctxOver.lineWidth = 1;
-      const x0 = state.pan.x % stepCanvas;
-      const y0 = state.pan.y % stepCanvas;
-      for (let x = x0; x < rect.width; x += stepCanvas) {
-        ctxOver.beginPath(); ctxOver.moveTo(x, 0); ctxOver.lineTo(x, rect.height); ctxOver.stroke();
-      }
-      for (let y = y0; y < rect.height; y += stepCanvas) {
-        ctxOver.beginPath(); ctxOver.moveTo(0, y); ctxOver.lineTo(rect.width, y); ctxOver.stroke();
-      }
-    }
+  // Output bounds when a rotation is pending (the PGM grows to fit).
+  if (state.mapRot && state.map) {
+    const dd = dispDims();
+    ctxOver.strokeStyle = 'rgba(201,100,66,0.8)';
+    ctxOver.lineWidth = 1;
+    ctxOver.setLineDash([6, 4]);
+    ctxOver.strokeRect(state.pan.x + 0.5, state.pan.y + 0.5, dd.w * state.zoom, dd.h * state.zoom);
+    ctxOver.setLineDash([]);
   }
+
+  // Metric grid (square cells, world-aligned, anchored at world 0,0)
+  if (state.showGrid && state.meta && state.map) drawGrid(rect);
+  else document.getElementById('status-grid').textContent = 'off';
 
   // Vector shapes
   if (state.layers.vector.visible) {
@@ -3311,8 +3794,7 @@ function drawOverlay(rect) {
 
   // Box-select rectangle
   if (state.boxSelect) {
-    const a = mapPxToCanvas(state.boxSelect.startMapPx.x, state.boxSelect.startMapPx.y);
-    const b = mapPxToCanvas(state.boxSelect.currentMapPx.x, state.boxSelect.currentMapPx.y);
+    const a = state.boxSelect.startC, b = state.boxSelect.curC;
     ctxOver.strokeStyle = '#C96442';
     ctxOver.fillStyle = 'rgba(201,100,66,0.10)';
     ctxOver.lineWidth = 1;
@@ -3328,6 +3810,107 @@ function drawOverlay(rect) {
     drawOriginMarker();
   }
 
+  // Rotate tool: pivot + angle readout
+  if (state.tool === 'rotate' && state.map) {
+    const px = rect.width / 2, py = rect.height / 2;
+    ctxOver.strokeStyle = 'rgba(201,100,66,0.9)';
+    ctxOver.lineWidth = 1.5;
+    ctxOver.beginPath();
+    ctxOver.moveTo(px - 10, py); ctxOver.lineTo(px + 10, py);
+    ctxOver.moveTo(px, py - 10); ctxOver.lineTo(px, py + 10);
+    ctxOver.stroke();
+    ctxOver.beginPath(); ctxOver.arc(px, py, 4, 0, Math.PI * 2); ctxOver.stroke();
+    const txt = (state.mapRot >= 0 ? '+' : '') + (+state.mapRot.toFixed(2)) + '°';
+    ctxOver.font = '600 15px ui-monospace, Menlo, monospace';
+    const tw = ctxOver.measureText(txt).width;
+    ctxOver.fillStyle = 'rgba(20,20,19,0.82)';
+    ctxOver.fillRect(px - tw / 2 - 10, 14, tw + 20, 28);
+    ctxOver.fillStyle = '#FFFFFF';
+    ctxOver.textAlign = 'center';
+    ctxOver.fillText(txt, px, 33);
+    ctxOver.textAlign = 'start';
+    if (state.rotateDrag) {
+      ctxOver.setLineDash([4, 4]);
+      ctxOver.strokeStyle = 'rgba(201,100,66,0.6)';
+      ctxOver.beginPath(); ctxOver.arc(px, py, 70, 0, Math.PI * 2); ctxOver.stroke();
+      ctxOver.setLineDash([]);
+    }
+  }
+
+  ctxOver.restore();
+}
+
+function drawGrid(rect) {
+  const res = state.meta.resolution;
+  const pxPerM = state.zoom / res;
+  const major = Math.max(1, state.gridMajor | 0);
+  let step = state.gridStep > 0 ? state.gridStep : 1;
+  // Merge cells when they get too small on screen.
+  let guard = 0;
+  while (step * pxPerM < 9 && guard++ < 12) step *= (major > 1 ? major : 2);
+  const fmt = v => (v >= 1 ? +v.toFixed(2) + ' m' : +(v * 100).toFixed(1) + ' cm');
+  document.getElementById('status-grid').textContent = fmt(step) + (step !== state.gridStep ? ' (auto)' : '');
+
+  // World extent visible on screen
+  const corners = [[0,0],[rect.width,0],[rect.width,rect.height],[0,rect.height]].map(([x,y]) => {
+    const m = canvasToMapPx(x, y);
+    return mapPxToWorld(m.x, m.y);
+  });
+  const xmin = Math.min(...corners.map(p => p.x)), xmax = Math.max(...corners.map(p => p.x));
+  const ymin = Math.min(...corners.map(p => p.y)), ymax = Math.max(...corners.map(p => p.y));
+
+  const O = worldToCanvas(0, 0);
+  const X = worldToCanvas(1, 0), Y = worldToCanvas(0, 1);
+  const ex = { x: X.x - O.x, y: X.y - O.y };   // canvas px per meter along world x
+  const ey = { x: Y.x - O.x, y: Y.y - O.y };
+
+  const i0 = Math.ceil(xmin / step), i1 = Math.floor(xmax / step);
+  const j0 = Math.ceil(ymin / step), j1 = Math.floor(ymax / step);
+  if ((i1 - i0) + (j1 - j0) > 6000) return;
+
+  const op = state.gridOpacity;
+  const minor = new Path2D(), majorP = new Path2D();
+  // lines of constant world x (parallel to world y)
+  for (let i = i0; i <= i1; i++) {
+    if (i === 0) continue;
+    const wx = i * step;
+    const a = { x: O.x + wx * ex.x + ymin * ey.x, y: O.y + wx * ex.y + ymin * ey.y };
+    const b = { x: O.x + wx * ex.x + ymax * ey.x, y: O.y + wx * ex.y + ymax * ey.y };
+    const P = (i % major === 0) ? majorP : minor;
+    P.moveTo(a.x, a.y); P.lineTo(b.x, b.y);
+  }
+  // lines of constant world y (parallel to world x)
+  for (let j = j0; j <= j1; j++) {
+    if (j === 0) continue;
+    const wy = j * step;
+    const a = { x: O.x + xmin * ex.x + wy * ey.x, y: O.y + xmin * ex.y + wy * ey.y };
+    const b = { x: O.x + xmax * ex.x + wy * ey.x, y: O.y + xmax * ex.y + wy * ey.y };
+    const P = (j % major === 0) ? majorP : minor;
+    P.moveTo(a.x, a.y); P.lineTo(b.x, b.y);
+  }
+  ctxOver.save();
+  ctxOver.lineWidth = 1;
+  ctxOver.strokeStyle = `rgba(74,109,140,${0.30 * op})`;
+  ctxOver.stroke(minor);
+  ctxOver.strokeStyle = `rgba(74,109,140,${0.70 * op})`;
+  ctxOver.lineWidth = 1.2;
+  ctxOver.stroke(majorP);
+  // World axes through (0,0): x axis red, y axis green
+  ctxOver.lineWidth = 1.5;
+  if (j0 <= 0 && j1 >= 0) {
+    ctxOver.strokeStyle = `rgba(184,84,54,${0.85 * op})`;
+    ctxOver.beginPath();
+    ctxOver.moveTo(O.x + xmin * ex.x, O.y + xmin * ex.y);
+    ctxOver.lineTo(O.x + xmax * ex.x, O.y + xmax * ex.y);
+    ctxOver.stroke();
+  }
+  if (i0 <= 0 && i1 >= 0) {
+    ctxOver.strokeStyle = `rgba(90,125,58,${0.85 * op})`;
+    ctxOver.beginPath();
+    ctxOver.moveTo(O.x + ymin * ey.x, O.y + ymin * ey.y);
+    ctxOver.lineTo(O.x + ymax * ey.x, O.y + ymax * ey.y);
+    ctxOver.stroke();
+  }
   ctxOver.restore();
 }
 
@@ -3417,15 +4000,18 @@ function shapePath(s) {
       }
       break;
     case 'rect': {
-      const a = mapPxToCanvas(s.x, s.y);
-      ctxOver.rect(a.x, a.y, s.w * state.zoom, s.h * state.zoom);
+      const pts = [[s.x, s.y], [s.x + s.w, s.y], [s.x + s.w, s.y + s.h], [s.x, s.y + s.h]]
+        .map(([x, y]) => mapPxToCanvas(x, y));
+      ctxOver.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < 4; i++) ctxOver.lineTo(pts[i].x, pts[i].y);
+      ctxOver.closePath();
       break;
     }
     case 'rrect': {
       const cc = mapPxToCanvas(s.cx, s.cy);
       ctxOver.save();
       ctxOver.translate(cc.x, cc.y);
-      ctxOver.rotate(s.theta);
+      ctxOver.rotate(s.theta - mapRotRad());
       ctxOver.rect(-s.w/2 * state.zoom, -s.h/2 * state.zoom, s.w * state.zoom, s.h * state.zoom);
       ctxOver.restore();
       break;
@@ -3437,12 +4023,13 @@ function shapePath(s) {
     }
     case 'ellipse': {
       const c = mapPxToCanvas(s.cx, s.cy);
-      ctxOver.ellipse(c.x, c.y, s.rx * state.zoom, s.ry * state.zoom, s.theta || 0, 0, Math.PI * 2);
+      ctxOver.ellipse(c.x, c.y, s.rx * state.zoom, s.ry * state.zoom, (s.theta || 0) - mapRotRad(), 0, Math.PI * 2);
       break;
     }
     case 'arc': {
       const c = mapPxToCanvas(s.cx, s.cy);
-      ctxOver.arc(c.x, c.y, s.r * state.zoom, s.a0, s.a1, s.a1 < s.a0);
+      const ra = mapRotRad();
+      ctxOver.arc(c.x, c.y, s.r * state.zoom, s.a0 - ra, s.a1 - ra, s.a1 < s.a0);
       break;
     }
     case 'bezier': {
@@ -3484,30 +4071,56 @@ function drawOriginMarker() {
   }
 
   const L = 28;
-  // X axis (red, +world_x → +canvas_x)
-  ctxOver.strokeStyle = '#B85436'; ctxOver.lineWidth = 2.5; ctxOver.lineCap = 'round';
-  ctxOver.beginPath(); ctxOver.moveTo(c.x, c.y); ctxOver.lineTo(c.x + L, c.y); ctxOver.stroke();
-  ctxOver.beginPath();
-  ctxOver.moveTo(c.x + L, c.y);
-  ctxOver.lineTo(c.x + L - 6, c.y - 4);
-  ctxOver.lineTo(c.x + L - 6, c.y + 4);
-  ctxOver.closePath();
-  ctxOver.fillStyle = '#B85436'; ctxOver.fill();
-  ctxOver.fillStyle = '#B85436';
-  ctxOver.font = 'bold 11px ui-monospace, Menlo, monospace';
-  ctxOver.fillText('x', c.x + L + 4, c.y + 4);
+  const yaw = state.meta.origin[2] || 0;
+  const drawAxis = (ang, color, label) => {
+    const ux = Math.cos(ang), uy = Math.sin(ang);
+    const tx = c.x + L * ux, ty = c.y + L * uy;
+    ctxOver.strokeStyle = color; ctxOver.lineWidth = 2.5; ctxOver.lineCap = 'round';
+    ctxOver.beginPath(); ctxOver.moveTo(c.x, c.y); ctxOver.lineTo(tx, ty); ctxOver.stroke();
+    // arrow head
+    const nx = -uy, ny = ux;
+    ctxOver.beginPath();
+    ctxOver.moveTo(tx, ty);
+    ctxOver.lineTo(tx - 6 * ux + 4 * nx, ty - 6 * uy + 4 * ny);
+    ctxOver.lineTo(tx - 6 * ux - 4 * nx, ty - 6 * uy - 4 * ny);
+    ctxOver.closePath();
+    ctxOver.fillStyle = color; ctxOver.fill();
+    ctxOver.font = 'bold 11px ui-monospace, Menlo, monospace';
+    ctxOver.textAlign = 'center';
+    ctxOver.fillText(label, c.x + (L + 9) * ux, c.y + (L + 9) * uy + 4);
+    ctxOver.textAlign = 'start';
+  };
+  // world +x is at canvas angle yaw, world +y is 90° CCW from it.
+  drawAxis(yaw, '#B85436', 'x');
+  drawAxis(yaw - Math.PI / 2, '#5A7D3A', 'y');
 
-  // Y axis (green, +world_y → -canvas_y)
-  ctxOver.strokeStyle = '#5A7D3A';
-  ctxOver.beginPath(); ctxOver.moveTo(c.x, c.y); ctxOver.lineTo(c.x, c.y - L); ctxOver.stroke();
-  ctxOver.beginPath();
-  ctxOver.moveTo(c.x, c.y - L);
-  ctxOver.lineTo(c.x - 4, c.y - L + 6);
-  ctxOver.lineTo(c.x + 4, c.y - L + 6);
-  ctxOver.closePath();
-  ctxOver.fillStyle = '#5A7D3A'; ctxOver.fill();
-  ctxOver.fillStyle = '#5A7D3A';
-  ctxOver.fillText('y', c.x - 4, c.y - L - 4);
+  // Rotation ring + knob (origin tool only)
+  if (state.tool === 'origin') {
+    ctxOver.save();
+    ctxOver.strokeStyle = 'rgba(20,20,19,0.35)';
+    ctxOver.lineWidth = 1;
+    ctxOver.setLineDash([3, 4]);
+    ctxOver.beginPath(); ctxOver.arc(c.x, c.y, ORIGIN_KNOB_R, 0, Math.PI * 2); ctxOver.stroke();
+    ctxOver.setLineDash([]);
+    const kx = c.x + ORIGIN_KNOB_R * Math.cos(yaw), ky = c.y + ORIGIN_KNOB_R * Math.sin(yaw);
+    ctxOver.fillStyle = state.originRotDrag ? '#B85436' : '#FFFFFF';
+    ctxOver.strokeStyle = '#B85436';
+    ctxOver.lineWidth = 2;
+    ctxOver.beginPath(); ctxOver.arc(kx, ky, 6.5, 0, Math.PI * 2); ctxOver.fill(); ctxOver.stroke();
+    const fa = originFrameAngleDeg();
+    if (state.originRotDrag || Math.abs(fa) > 1e-6) {
+      const t = (fa >= 0 ? '+' : '') + (+fa.toFixed(2)) + '°';
+      ctxOver.font = '11px ui-monospace, Menlo, monospace';
+      const tw = ctxOver.measureText(t).width;
+      ctxOver.fillStyle = 'rgba(20,20,19,0.8)';
+      ctxOver.fillRect(c.x - tw / 2 - 5, c.y - ORIGIN_KNOB_R - 26, tw + 10, 17);
+      ctxOver.fillStyle = '#FFFFFF';
+      ctxOver.textAlign = 'center';
+      ctxOver.fillText(t, c.x, c.y - ORIGIN_KNOB_R - 13);
+      ctxOver.textAlign = 'start';
+    }
+    ctxOver.restore();
+  }
 
   // center disc
   ctxOver.fillStyle = '#FFFFFF';
@@ -3572,8 +4185,13 @@ function snapshotState() {
   return {
     label: '',
     mapData: state.map ? Array.from(state.map.data) : null,
+    mapW: state.map ? state.map.width : 0,
+    mapH: state.map ? state.map.height : 0,
     maskData: state.mask ? Array.from(state.mask.data) : null,
+    maskW: state.mask ? state.mask.width : 0,
+    maskH: state.mask ? state.mask.height : 0,
     origin: state.meta ? [...state.meta.origin] : null,
+    mapRot: state.mapRot || 0,
     shapes: [...state.shapes.values()].map(deepCopyShape),
     selection: [...state.selection],
     nextShapeId: state.nextShapeId,
@@ -3583,13 +4201,17 @@ function snapshotState() {
 function restoreState(snap) {
   if (snap.mapData && state.map) {
     state.map.data = new Uint8Array(snap.mapData);
+    if (snap.mapW) { state.map.width = snap.mapW; state.map.height = snap.mapH; }
     rebuildMapImageData();
   }
   if (snap.maskData && state.mask) {
     state.mask.data = new Uint8Array(snap.maskData);
+    if (snap.maskW) { state.mask.width = snap.maskW; state.mask.height = snap.maskH; }
     rebuildMaskImageData();
   }
   if (snap.origin && state.meta) state.meta.origin = [...snap.origin];
+  state.mapRot = snap.mapRot || 0;
+  updateRotationStatus();
   state.shapes.clear();
   snap.shapes.forEach(s => state.shapes.set(s.id, deepCopyShape(s)));
   state.nextShapeId = snap.nextShapeId;
@@ -3660,6 +4282,7 @@ function saveProject() {
     shapes: [...state.shapes.values()],
     nextShapeId: state.nextShapeId,
     layers: state.layers,
+    mapRot: state.mapRot || 0,
   };
   const blob = new Blob([JSON.stringify(proj)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -3693,6 +4316,7 @@ async function loadProject(proj) {
   (proj.shapes || []).forEach(s => state.shapes.set(s.id, s));
   state.nextShapeId = proj.nextShapeId || ((proj.shapes && proj.shapes.length) ? Math.max(...proj.shapes.map(s=>s.id)) + 1 : 1);
   if (proj.layers) Object.assign(state.layers, proj.layers);
+  state.mapRot = proj.mapRot || 0;
   finishLoading();
 }
 
@@ -3709,23 +4333,29 @@ function downloadMap() {
     : { width: state.map.width, height: state.map.height, maxval: 255,
         data: new Uint8Array(state.map.width * state.map.height).fill(255) };
   state.shapes.forEach(s => rasterizeShape(s, tempMap, tempMask));
+  // Bake the pending rotation (origin values already refer to the rotated frame).
+  let outMap = tempMap, outMask = tempMask;
+  if (state.mapRot) {
+    outMap = rotateRasterBuf(tempMap, state.mapRot, TARGET_INFO.unscan.value);
+    outMask = rotateRasterBuf(tempMask, state.mapRot, 255);
+  }
 
   const baseName = (state.fileNames.pgm || 'map').replace(/\.pgm$/i, '') + '_edited';
-  const pgmBlob = pgmToBlob(tempMap);
+  const pgmBlob = pgmToBlob(outMap);
   const yamlText = yamlToText(state.meta, baseName + '.pgm');
   triggerDownload(pgmBlob, baseName + '.pgm');
   triggerDownload(new Blob([yamlText], { type: 'text/yaml' }), baseName + '.yaml');
 
   // Mask: only emit if there's any keepout (non-white) pixel OR shapes targeted at keepout
   let hasKeepout = false;
-  for (let i = 0; i < tempMask.data.length; i++) {
-    if (tempMask.data[i] < 250) { hasKeepout = true; break; }
+  for (let i = 0; i < outMask.data.length; i++) {
+    if (outMask.data[i] < 250) { hasKeepout = true; break; }
   }
   if (hasKeepout) {
     const maskBase = baseName + '_keepout';
     const maskMeta = { ...state.meta };
     const maskYamlText = yamlToText(maskMeta, maskBase + '.pgm');
-    triggerDownload(pgmToBlob(tempMask), maskBase + '.pgm');
+    triggerDownload(pgmToBlob(outMask), maskBase + '.pgm');
     triggerDownload(new Blob([maskYamlText], { type: 'text/yaml' }), maskBase + '.yaml');
   }
 }

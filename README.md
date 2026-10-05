@@ -28,6 +28,9 @@ This editor keeps every shape you draw as a vector object on top of the raster. 
 - **Ten shape primitives.** Brush, line, polyline, rectangle, rotated rectangle, polygon, circle, ellipse, arc, bezier curve.
 - **Four target channels.** Wall, Erase, Un-scan (writes to map raster), Keep-out (writes to a separate mask raster compatible with the Nav2 keep-out filter).
 - **Bucket fill.** Flood-fill any enclosed region with the current target. Vector shapes act as barriers, so you can fill the interior of a Wall outline with Erase to clear a room in one click.
+- **Map rotation.** Rotate the whole map (raster, keep-out mask and shapes) in 1° steps, or 0.1° / 15° with modifiers, from the Rotate tool, a slider, the `,` / `.` keys or Alt+scroll. Non-destructive until Apply or Download; the exported PGM grows to fit and new pixels are written as unknown (205).
+- **Origin frame rotation.** Drag the knob on the origin marker ring or scroll over the marker to turn the world frame. Since Nav2 costmaps and AMCL ignore yaw in `map.yaml`, *Straighten map to this frame* rotates the raster so the frame becomes axis-aligned and yaw returns to 0.
+- **Metric square grid.** World-aligned grid anchored at (0, 0) with configurable cell size, major lines and opacity; cells merge automatically when zoomed out. Snap-to-grid snaps to the same world grid.
 - **Editable map origin.** Place world (0, 0) anywhere on the map by click, drag, pixel input, or raw YAML coordinates. Off-canvas marker is indicated by an edge chevron.
 - **Round-trip projects.** Save the entire editing session as `.sasmap.json` and resume later with shapes, origin, layers and history intact.
 - **Live distance measurement** in meters, feet and pixels.
